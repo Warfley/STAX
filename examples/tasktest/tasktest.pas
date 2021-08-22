@@ -5,67 +5,36 @@ program tasktest;
 uses
   {$IFDEF UNIX}
   cthreads,{$ENDIF}
-  Classes, SysUtils, stax;
+  Classes, SysUtils, stax, stax.tasks.functional;
 
-type
+procedure AsyncWrite(AExecutor: TExecutor; ALine: String);
+begin
+  WriteLn(ALine);
+end;
 
-  { TWritingTask }
+function AsyncConcat(AExecutor: TExecutor; AName: String; ANumber: Integer): String;
+begin
+  Result := '%s: %d'.Format([AName, ANumber]);
+end;
 
-  TWritingTask = class(TTask)
-  private
-    FLine: String;
-  protected
-    procedure Execute; override;
-  public
-    constructor Create(AExecutor: TExecutor; ALine: String);
-  end;
-
-  { TCountingTask }
-
-  TCountingTask = class(TTask)
-  private
-    FName: String;
-  protected
-    procedure Execute; override;
-  public
-    constructor Create(AExecutor: TExecutor; AName: String);
-  end;
-
-{ TCountingTask }
-
-procedure TCountingTask.Execute;
+procedure AsyncCount(AExecutor: TExecutor; AName: String);
 var
   i: Integer;
+  line: String;
 begin
   for i:=0 to 10 do
-    Executor.Await(TWritingTask.Create(Executor, '%s: %d'.Format([FName, i])));
-end;
-
-constructor TCountingTask.Create(AExecutor: TExecutor; AName: String);
-begin
-  inherited Create(AExecutor);
-  FName := AName;
-end;
-
-{ TWritingTask }
-
-procedure TWritingTask.Execute;
-begin
-  WriteLn(FLine);
-end;
-
-constructor TWritingTask.Create(AExecutor: TExecutor; ALine: String);
-begin
-  inherited Create(AExecutor);
-  FLine := ALine;
+  begin
+    Line := specialize Await<String>(specialize FunctionTask<String, String, Integer>(@AsyncConcat, AName, i));
+    Await(specialize ProcedureTask<String>(@AsyncWrite, Line));
+  end;
 end;
 
 var
   exec: TExecutor;
 begin
   exec := TExecutor.Create;
-  exec.RunAsync(TCountingTask.Create(exec, 'C1'));
-  exec.RunAsync(TCountingTask.Create(exec, 'C2'));
+  exec.RunAsync(specialize ProcedureTask<String>(@AsyncCount, 'C1'));
+  exec.RunAsync(specialize ProcedureTask<String>(@AsyncCount, 'C2'));
   exec.Run;
   exec.Free;
   ReadLn;

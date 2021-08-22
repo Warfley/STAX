@@ -25,7 +25,7 @@ type
   protected
     procedure Execute; virtual; abstract;
   public
-    constructor Create(AExecutor: TExecutor);
+    constructor Create;
 
     procedure Run(WorkerThread: TWorkerThread);
 
@@ -39,10 +39,11 @@ type
 
   generic TRVTask<T> = class(TTask)
   protected
-    Result: T;
-  public
+    FResult: T;
+  protected
     procedure Execute; override;
-    property TaskResult: T read Result;
+  public
+    property TaskResult: T read FResult;
   end;
 
   TWorkerStatus = (wsIdle, wsRunning, wsPaused);
@@ -56,10 +57,11 @@ type
     FBarrier: TBarrier;
     FStatus: TWorkerStatus;
     FTask: TTask;
+    FExecutor: TExecutor;
   protected
     procedure Execute; override;
   public
-    constructor Create;
+    constructor Create(AExecutor: TExecutor);
     destructor Destroy; override;
 
     procedure RunTask(ATask: TTask);
@@ -70,6 +72,7 @@ type
 
     property Status: TWorkerStatus read FStatus;
     property Task: TTask read FTask;
+    property Executor: TExecutor read FExecutor;
   end;
 
 
@@ -98,6 +101,7 @@ type
   TWorkerList = specialize TList<TWorkerThread>;
 
   ETaskAlreadyScheduledException = class(Exception);
+  ENotATaskException = class(Exception);
 
   { TExecutor }
 
@@ -118,13 +122,66 @@ type
 
     procedure RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True);
     procedure Await(ATask: TTask; FreeTask: Boolean = True);
+    // For some reason this breaks fpc, so we added this as a global function
+    //generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
+    procedure Yield;
 
     procedure Run;
 
     property OnError: TErrorHandler read FErrorHandler write FErrorHandler;
   end;
 
+
+function GetExecutor: TExecutor; inline;
+procedure Await(ATask: TTask; FreeTask: Boolean = True);
+generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
+procedure Yield;
+
 implementation
+
+generic
+
+function GetExecutor: TExecutor;
+begin
+  Result := nil;
+  if TThread.CurrentThread is TWorkerThread then
+    Result := TWorkerThread(TThread.CurrentThread).Executor;
+end;
+
+procedure Await(ATask: TTask; FreeTask: Boolean);
+var
+  Executor: TExecutor;
+begin
+  Executor := GetExecutor;
+  if not Assigned(Executor) then
+    raise ENotATaskException.Create('Await can only be called from within a Task');
+  Executor.Await(ATask, FreeTask);
+end;
+
+generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
+var
+  Executor: TExecutor;
+begin
+  Executor := GetExecutor;
+  if not Assigned(Executor) then
+    raise ENotATaskException.Create('Await can only be called from within a Task');
+  try
+    Executor.Await(ATask, False);
+    Result := ATask.TaskResult;
+  finally
+    if FreeTask then ATask.Free;
+  end;
+end;
+
+procedure Yield;
+var
+  Executor: TExecutor;
+begin
+  Executor := GetExecutor;
+  if not Assigned(Executor) then
+    raise ENotATaskException.Create('Yield can only be called from within a Task');
+  Executor.Yield;
+end;
 
 { TWorkerThread }
 
@@ -147,9 +204,10 @@ begin
   end;
 end;
 
-constructor TWorkerThread.Create;
+constructor TWorkerThread.Create(AExecutor: TExecutor);
 begin
   inherited Create(True);
+  FExecutor := AExecutor;
   FBarrier.Initialize(2);
   FTask := nil;
   FreeOnTerminate:=True;
@@ -242,7 +300,7 @@ begin
   if FWorkers.Count > 0 then
     Result := FWorkers.ExtractIndex(FWorkers.Count - 1)
   else
-    Result := TWorkerThread.Create;
+    Result := TWorkerThread.Create(Self);
 end;
 
 procedure TExecutor.ExecTask(ATask: TTask);
@@ -293,6 +351,7 @@ var
 begin
   if ATask.Status <> tsNone then
     raise ETaskAlreadyScheduledException.Create('Task already scheduled');
+  ATask.FExecutor := Self;
   NewEntry.Task := ATask;
   NewEntry.FreeTask := FreeTask;
   NewEntry.RaiseError := RaiseErrors;
@@ -304,7 +363,7 @@ var
   Worker: TWorkerThread;
 begin
   if not (TThread.CurrentThread is TWorkerThread) then
-    raise EWorkerError.Create('Can only await inside an asynchronous job');
+    raise ENotATaskException.Create('Can only await inside a task');
   try
     Worker := TWorkerThread(TThread.CurrentThread);
     // schedule task to await
@@ -318,6 +377,24 @@ begin
     if FreeTask then
       ATask.Free;
   end;
+end;
+
+{generic function TExecutor.Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
+begin
+  try
+    Self.Await(ATask, False);
+    Result := ATask.TaskResult;
+  finally
+    if FreeTask then
+      ATask.Free;
+  end;
+end;}
+
+procedure TExecutor.Yield;
+begin
+  if not (TThread.CurrentThread is TWorkerThread) then
+    raise EWorkerError.Create('Can only yield inside an asynchronous job');
+  TWorkerThread(TThread.CurrentThread).Yield;
 end;
 
 procedure TExecutor.Run;
@@ -340,16 +417,16 @@ end;
 
 procedure TRVTask.Execute;
 begin
-  Self.Result := Default(T);
+  FResult := Default(T);
 end;
 
 { TTask }
 
-constructor TTask.Create(AExecutor: TExecutor);
+constructor TTask.Create;
 begin
   FError := nil;
   FStatus := tsNone;
-  FExecutor := AExecutor;
+  FExecutor := nil;
 end;
 
 procedure TTask.Run(WorkerThread: TWorkerThread);

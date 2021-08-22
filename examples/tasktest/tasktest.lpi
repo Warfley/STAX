@@ -26,7 +26,7 @@
       <FormatVersion Value="2"/>
       <Modes Count="0"/>
     </RunParams>
-    <Units Count="5">
+    <Units Count="8">
       <Unit0>
         <Filename Value="tasktest.pas"/>
         <IsPartOfProject Value="True"/>
@@ -47,6 +47,18 @@
         <Filename Value="..\..\external\FPCBarrier\win_barrier.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit4>
+      <Unit5>
+        <Filename Value="..\..\src\stax.tasks.functional.procedures.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit5>
+      <Unit6>
+        <Filename Value="..\..\src\stax.tasks.functional.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit6>
+      <Unit7>
+        <Filename Value="..\..\src\stax.tasks.functional.functions.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit7>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
