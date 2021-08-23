@@ -26,7 +26,7 @@
       <FormatVersion Value="2"/>
       <Modes Count="0"/>
     </RunParams>
-    <Units Count="8">
+    <Units Count="11">
       <Unit0>
         <Filename Value="tasktest.pas"/>
         <IsPartOfProject Value="True"/>
@@ -59,6 +59,19 @@
         <Filename Value="..\..\src\stax.tasks.functional.functions.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit7>
+      <Unit8>
+        <Filename Value="..\..\src\stax.tasks.io.console.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit8>
+      <Unit9>
+        <Filename Value="..\..\src\stax.tasks.io.pas"/>
+        <IsPartOfProject Value="True"/>
+      </Unit9>
+      <Unit10>
+        <Filename Value="..\..\external\LazTermUtils\src\compatibility.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="Compatibility"/>
+      </Unit10>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
@@ -69,7 +82,7 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="..\..\src;..\..\external\FPCBarrier"/>
+      <OtherUnitFiles Value="..\..\src;..\..\external\FPCBarrier;..\..\external\LazTermUtils\src"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Parsing>

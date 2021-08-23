@@ -66,6 +66,7 @@ type
 
     procedure RunTask(ATask: TTask);
     procedure Yield;
+    procedure Sleep(time: QWord);
     procedure ResumeTask;
 
     procedure Stop;
@@ -125,6 +126,7 @@ type
     // For some reason this breaks fpc, so we added this as a global function
     //generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
     procedure Yield;
+    procedure Sleep(time: QWord);
 
     procedure Run;
 
@@ -136,6 +138,7 @@ function GetExecutor: TExecutor; inline;
 procedure Await(ATask: TTask; FreeTask: Boolean = True);
 generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
 procedure Yield;
+procedure AsyncSleep(time: QWord);
 
 implementation
 
@@ -181,6 +184,16 @@ begin
   if not Assigned(Executor) then
     raise ENotATaskException.Create('Yield can only be called from within a Task');
   Executor.Yield;
+end;
+
+procedure AsyncSleep(time: QWord);
+var
+  Executor: TExecutor;
+begin
+  Executor := GetExecutor;
+  if not Assigned(Executor) then
+    raise ENotATaskException.Create('AsyncSleep can only be called from within a Task');
+  Executor.Sleep(time);
 end;
 
 { TWorkerThread }
@@ -246,6 +259,16 @@ begin
   // check if terminated during the waiting
   if Terminated then
     raise EWorkerTerminatedException.Create('Worker terminated during yield');
+end;
+
+procedure TWorkerThread.Sleep(time: QWord);
+var
+  StartTime: QWord;
+begin
+  StartTime := GetTickCount64;
+  repeat
+    Yield;
+  until (GetTickCount64 - StartTime) > time;
 end;
 
 procedure TWorkerThread.ResumeTask;
@@ -395,6 +418,13 @@ begin
   if not (TThread.CurrentThread is TWorkerThread) then
     raise EWorkerError.Create('Can only yield inside an asynchronous job');
   TWorkerThread(TThread.CurrentThread).Yield;
+end;
+
+procedure TExecutor.Sleep(time: QWord);
+begin
+  if not (TThread.CurrentThread is TWorkerThread) then
+    raise EWorkerError.Create('Can only sleep inside an asynchronous job');
+  TWorkerThread(TThread.CurrentThread).Sleep(time);
 end;
 
 procedure TExecutor.Run;

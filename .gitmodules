@@ -1,3 +1,6 @@
 [submodule "external/FPCBarrier"]
 	path = external/FPCBarrier
 	url = git@github.com:Warfley/FPCBarrier.git
+[submodule "external/LazTermUtils"]
+	path = external/LazTermUtils
+	url = git@github.com:Warfley/LazTermUtils.git
