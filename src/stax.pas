@@ -5,7 +5,7 @@ unit stax;
 interface
 
 uses
-  Classes, SysUtils, Generics.Collections, stax.helpertypes, barrier;
+  Classes, SysUtils, Generics.Collections, stax.helpertypes;
 
 type
   TExecutor = class;
@@ -39,6 +39,8 @@ type
     FStack: TStackData;
     FTaskEnv: jmp_buf;
     FTerminated: Boolean;
+
+    procedure DoExecute(a: Boolean=True);
   protected
     procedure Execute; virtual; abstract;
   public
@@ -411,6 +413,20 @@ begin
     FreeMem(AStackData.Memory, AStackData.Size);
 end;
 
+procedure TTask.DoExecute(a: Boolean=True);
+begin
+  // Start the execution
+  FStatus := tsRunning;
+  try
+    Execute;
+    FStatus := tsFinished;
+  except on E: Exception do begin
+    FError := E;
+    FStatus := tsError;
+  end
+  end;
+end;
+
 constructor TTask.Create(AStackSize: SizeInt);
 begin
   FTerminated := False;
@@ -453,16 +469,7 @@ begin
   MOV RSP, NewStackPtr
   MOV RBP, NewBasePtr
   end;
-  // Start the execution
-  FStatus := tsRunning;
-  try
-    Execute;  
-    FStatus := tsFinished;
-  except on E: Exception do begin
-    FError := E;
-    FStatus := tsError;
-  end
-  end;
+  DoExecute;
   longjmp(AExecutor.FSchedulerEnv, 1);
 end;
 

@@ -11,7 +11,7 @@
       </Flags>
       <SessionStorage Value="InProjectDir"/>
       <MainUnit Value="0"/>
-      <Title Value="tasktest"/>
+      <Title Value="exceptiontest"/>
       <UseAppBundle Value="False"/>
       <ResourceType Value="res"/>
     </General>
@@ -26,9 +26,9 @@
       <FormatVersion Value="2"/>
       <Modes Count="0"/>
     </RunParams>
-    <Units Count="9">
+    <Units Count="7">
       <Unit0>
-        <Filename Value="tasktest.pas"/>
+        <Filename Value="exceptiontest.lpr"/>
         <IsPartOfProject Value="True"/>
       </Unit0>
       <Unit1>
@@ -40,7 +40,7 @@
         <IsPartOfProject Value="True"/>
       </Unit2>
       <Unit3>
-        <Filename Value="..\..\src\stax.tasks.functional.procedures.pas"/>
+        <Filename Value="..\..\src\stax.tasks.functional.functions.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit3>
       <Unit4>
@@ -48,54 +48,26 @@
         <IsPartOfProject Value="True"/>
       </Unit4>
       <Unit5>
-        <Filename Value="..\..\src\stax.tasks.functional.functions.pas"/>
+        <Filename Value="..\..\src\stax.tasks.functional.procedures.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit5>
       <Unit6>
-        <Filename Value="..\..\src\stax.tasks.io.console.pas"/>
-        <IsPartOfProject Value="True"/>
-      </Unit6>
-      <Unit7>
         <Filename Value="..\..\src\stax.tasks.io.pas"/>
         <IsPartOfProject Value="True"/>
-      </Unit7>
-      <Unit8>
-        <Filename Value="..\..\external\LazTermUtils\src\compatibility.pas"/>
-        <IsPartOfProject Value="True"/>
-        <UnitName Value="Compatibility"/>
-      </Unit8>
+      </Unit6>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
     <Version Value="11"/>
     <PathDelim Value="\"/>
     <Target>
-      <Filename Value="tasktest"/>
+      <Filename Value="exceptiontest"/>
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="..\..\src;..\..\external\LazTermUtils\src"/>
+      <OtherUnitFiles Value="C:\Users\frederic\Documents\Projects\stax\src"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
-    <Parsing>
-      <SyntaxOptions>
-        <IncludeAssertionCode Value="True"/>
-      </SyntaxOptions>
-    </Parsing>
-    <CodeGeneration>
-      <Checks>
-        <IOChecks Value="True"/>
-        <RangeChecks Value="True"/>
-        <OverflowChecks Value="True"/>
-        <StackChecks Value="True"/>
-      </Checks>
-      <VerifyObjMethodCallValidity Value="True"/>
-    </CodeGeneration>
-    <Linking>
-      <Debugging>
-        <UseHeaptrc Value="True"/>
-      </Debugging>
-    </Linking>
   </CompilerOptions>
   <Debugging>
     <Exceptions Count="3">

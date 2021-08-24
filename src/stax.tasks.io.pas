@@ -89,7 +89,117 @@ type
     destructor Destroy; override;
   end;
 
+  { TIOWriteTask }
+
+  generic TIOWriteTask<T> = class(TTask)
+  private
+    FWriter: TIOWriter;
+    FOwnsWriter: Boolean;
+    FData: T;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AWriter: TIOWriter; const AData: T; AOwnsWriter: Boolean = True);
+    destructor Destroy; override;
+  end;
+
+  { TIOBufferWriteTask }
+
+  TIOBufferWriteTask = class(TTask)
+  private
+    FWriter: TIOWriter;
+    FBuffer: Pointer;
+    FCount: SizeInt;
+    FOwnsWriter: Boolean;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AWriter: TIOWriter; ABuffer: Pointer; ACount: SizeInt; AOwnsWriter: Boolean = True);
+    destructor Destroy; override;
+  end;
+
+  { TIOStringWriteTask }
+
+  TIOStringWriteTask = class(TTask)
+  private
+    FWriter: TIOWriter;
+    FData: String;
+    FOwnsWriter: Boolean;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AWriter: TIOWriter; const AData: String; AOwnsWriter: Boolean = True);
+    destructor Destroy; override;
+  end;
+
 implementation
+
+{ TIOStringWriteTask }
+
+procedure TIOStringWriteTask.Execute;
+begin
+  FWriter.AsyncWrite(Executor, @FData[1], FData.Length);
+end;
+
+constructor TIOStringWriteTask.Create(AWriter: TIOWriter; const AData: String;
+  AOwnsWriter: Boolean);
+begin
+  inherited Create;
+  FWriter := AWriter;
+  FOwnsWriter := AOwnsWriter;
+  FData := AData;
+end;
+
+destructor TIOStringWriteTask.Destroy;
+begin
+  if FOwnsWriter then FWriter.Free;
+  inherited Destroy;
+end;
+
+{ TIOBufferWriteTask }
+
+procedure TIOBufferWriteTask.Execute;
+begin
+  FWriter.AsyncWrite(Executor, FBuffer, FCount);
+end;
+
+constructor TIOBufferWriteTask.Create(AWriter: TIOWriter; ABuffer: Pointer;
+  ACount: SizeInt; AOwnsWriter: Boolean);
+begin
+  inherited Create;
+  FWriter := AWriter;
+  FOwnsWriter := AOwnsWriter;
+  FBuffer := ABuffer;
+  FCount := ACount;
+end;
+
+destructor TIOBufferWriteTask.Destroy;
+begin
+  if FOwnsWriter then FWriter.Free;
+  inherited Destroy;
+end;
+
+{ TIOWriteTask }
+
+procedure TIOWriteTask.Execute;
+begin
+  FWriter.AsyncWrite(Executor, @FData, SizeOf(T));
+end;
+
+constructor TIOWriteTask.Create(AWriter: TIOWriter; const AData: T;
+  AOwnsWriter: Boolean);
+begin
+  inherited Create;
+  FWriter := AWriter;
+  FOwnsWriter := AOwnsWriter;
+  FData := AData;
+end;
+
+destructor TIOWriteTask.Destroy;
+begin
+  if FOwnsWriter then FWriter.Free;
+  inherited Destroy;
+end;
 
 procedure TIOReader.AsyncRead(AExecutor: TExecutor; ABuffer: Pointer;
   ACount: SizeInt);

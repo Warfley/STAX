@@ -24,8 +24,8 @@ var
 begin
   for i:=0 to 10 do
   begin
-    Line := specialize Await<String>(specialize FunctionTask<String, String, Integer>(@AsyncConcat, AName, i));
-    Await(specialize ProcedureTask<String>(@AsyncWrite, Line));
+    Line := specialize Await<String>(specialize AsyncFunction<String, String, Integer>(@AsyncConcat, AName, i));
+    Await(specialize AsyncProcedure<String>(@AsyncWrite, Line));
   end;
 end;
 
@@ -33,8 +33,8 @@ var
   exec: TExecutor;
 begin
   exec := TExecutor.Create;
-  exec.RunAsync(specialize ProcedureTask<String>(@AsyncCount, 'C1'));
-  exec.RunAsync(specialize ProcedureTask<String>(@AsyncCount, 'C2'));
+  exec.RunAsync(specialize AsyncProcedure<String>(@AsyncCount, 'C1'));
+  exec.RunAsync(specialize AsyncProcedure<String>(@AsyncCount, 'C2'));
   exec.Run;
   exec.Free;
   ReadLn;
