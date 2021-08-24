@@ -5,34 +5,27 @@ program tasktest;
 uses
   {$IFDEF UNIX}
   cthreads,{$ENDIF}
-  Classes, SysUtils, stax, stax.tasks.functional, stax.tasks.io.console;
+  Classes, SysUtils, stax, stax.tasks.functional;
 
 procedure AsyncWrite(AExecutor: TExecutor; ALine: String);
 begin
   WriteLn(ALine);
 end;
 
-procedure Echo(AExecutor: TExecutor);
-var
-  line: String;
+function AsyncConcat(AExecutor: TExecutor; AName: String; ANumber: Integer): String;
 begin
-  While True do
-  begin
-    line := specialize Await<String>(AsyncConsoleReadLn(True));
-    Await(specialize ProcedureTask<String>(@AsyncWrite, line));
-  end;
+  Result := '%s: %d'.Format([AName, ANumber]);
 end;
 
-procedure Counter(AExecutor: TExecutor);
+procedure AsyncCount(AExecutor: TExecutor; AName: String);
 var
   i: Integer;
+  line: String;
 begin
-  i := 0;
-  while True do
+  for i:=0 to 10 do
   begin
-    Await(specialize ProcedureTask<String>(@AsyncWrite, i.ToString));
-    AExecutor.Sleep(1000);
-    Inc(i);
+    Line := specialize Await<String>(specialize FunctionTask<String, String, Integer>(@AsyncConcat, AName, i));
+    Await(specialize ProcedureTask<String>(@AsyncWrite, Line));
   end;
 end;
 
@@ -40,10 +33,9 @@ var
   exec: TExecutor;
 begin
   exec := TExecutor.Create;
-  exec.RunAsync(ProcedureTask(@Echo));
-  exec.RunAsync(ProcedureTask(@Counter));
+  exec.RunAsync(specialize ProcedureTask<String>(@AsyncCount, 'C1'));
+  exec.RunAsync(specialize ProcedureTask<String>(@AsyncCount, 'C2'));
   exec.Run;
   exec.Free;
   ReadLn;
 end.
-
