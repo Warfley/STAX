@@ -634,7 +634,7 @@ var
   CurrTime: QWord;
 begin
   CurrTime := GetTickCount64;
-  while not FSleepQueue.IsEmpty and (FSleepQueue.Top.First <= CurrTime) do
+  while not FSleepQueue.IsEmpty and (FSleepQueue.Top.First < CurrTime) do
   begin
     FSleepQueue.Top.Second.Reschedule;
     FSleepQueue.Pop;
