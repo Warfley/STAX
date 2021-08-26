@@ -66,6 +66,8 @@ type
     procedure Sleep(Time: QWord);
     procedure Stop; {$IFDEF inlining}inline;{$ENDIF}
 
+    function ExtractError: Exception;
+
     property Error: Exception read FError;
     property Status: TTaskStatus read FStatus;
     property Executor: TExecutor read FExecutor;
@@ -95,6 +97,7 @@ type
     Task: TTask;
 
     constructor Create(AError: Exception; ATask: TTask);
+    destructor Destroy; override;
   end;
 
   TTaskQueueEntry = record
@@ -220,6 +223,12 @@ begin
   Task := ATask;
 end;
 
+destructor EUnhandledError.Destroy;
+begin
+  Error.Free;
+  inherited Destroy;
+end;
+
 { TExecutor }
 
 class constructor TExecutor.InitStatics;
@@ -250,13 +259,15 @@ begin
 end;
 
 procedure TExecutor.RaiseErrorHandler(Task: TTask);
+var
+  err: Exception;
 begin
   if FErrorHandler.isFirst then
     FErrorHandler.First()(Task, Task.Error)
   else if FErrorHandler.isSecond then
     FErrorHandler.Second()(Task, Task.Error)
   else
-    raise EUnhandledError.Create(Task.Error, Task);
+    raise EUnhandledError.Create(Task.ExtractError, Task);
 end;
 
 procedure TExecutor.ScheduleTask(constref QueueEntry: TTaskQueueEntry);
@@ -337,7 +348,7 @@ begin
     while ATask.Status < tsFinished do
       FCurrentTask.Yield;
     if ATask.Status = tsError then
-      raise ATask.Error;
+      raise ATask.ExtractError;
   finally
     if FreeTask then
       ATask.Free;
@@ -452,6 +463,8 @@ end;
 {$EndIf}
 
 procedure TTask.DoExecute;
+label
+  exception_hack;
 begin
   // Start the execution
   FStatus := tsRunning;
@@ -461,8 +474,13 @@ begin
   except on E: Exception do begin
     FError := E;
     FStatus := tsError;
+    {$AsmMode intel}
+    asm
+    JMP exception_hack
+    end;
   end
   end;
+exception_hack:
 end;
 
 constructor TTask.Create(AStackSize: SizeInt);
@@ -490,6 +508,8 @@ begin
   {$Else}
   TTask.FreeStack(FStack);
   {$EndIf}
+  if Assigned(FError) then
+    FError.Free;
   inherited Destroy;
 end;
 
@@ -569,6 +589,12 @@ procedure TTask.Stop;
 begin
   Terminate;
   Yield;
+end;
+
+function TTask.ExtractError: Exception;
+begin
+  Result := FError;
+  FError := nil;
 end;
 
 procedure TTask.Terminate;

@@ -83,8 +83,6 @@ end;
 ```
 
 ## Exceptions
-**WARNING: Exceptions do not work currently**
-
 When a `Task` raises an exception which is not handled within the task, it is stored within the `TTask` object and can be used later on.
 STAX provides two standard ways to deal with such exceptions that can be configured when scheduling the task.
 First there is the `OnError` event of the `TExecutor`, which can be called if a `TTask` finished with an unhandled exception.
