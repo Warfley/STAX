@@ -33,8 +33,9 @@ type
       Memory: Pointer;
     end;
     TStackCache = specialize TList<TStackData>;
-  public
+  private
     class var StackCache: TStackCache;
+    class var CacheCriticalSection: TRTLCriticalSection;
     class constructor InitStatics;
     class destructor CleanupStatics;
     class function AllocStack(ASize: SizeInt): TStackData; static; {$IFDEF inlining}inline;{$ENDIF}
@@ -66,7 +67,7 @@ type
     procedure Sleep(Time: QWord);
     procedure Stop; {$IFDEF inlining}inline;{$ENDIF}
 
-    function ExtractError: Exception;
+    function ExtractError: Exception; {$IFDEF inlining}inline;{$ENDIF}
 
     property Error: Exception read FError;
     property Status: TTaskStatus read FStatus;
@@ -108,6 +109,7 @@ type
 
   TTaskQueue = specialize TQueue<TTaskQueueEntry>;
 
+  EForeignTaskException = class(Exception);
   ETaskAlreadyScheduledException = class(Exception);
   ENotATaskException = class(Exception);
 
@@ -118,6 +120,7 @@ type
     TThreadExecutorMap = specialize TDictionary<TThreadID, TExecutor>;
   private
     class var ThreadExecutorMap: TThreadExecutorMap;
+    class var ExecutorMapCriticalSection: TRTLCriticalSection;
     class constructor InitStatics;
     class destructor CleanupStatics;
     class procedure RegisterExecutor(ThreadID: TThreadID; Executor: TExecutor); static; {$IFDEF inlining}inline;{$ENDIF}
@@ -144,8 +147,9 @@ type
     destructor Destroy; override;
 
     procedure RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True);
-    procedure Await(ATask: TTask; FreeTask: Boolean = True);
-    // For some reason this breaks fpc, so we added this as a global function
+    procedure ScheduleForAwait(ATask: TTask); inline;
+    // For some reason this breaks fpc, so we added this as a type helper
+    //procedure Await(ATask: TTask; FreeTask: Boolean = True);
     //generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
     procedure Yield;
     procedure Sleep(time: QWord);
@@ -156,10 +160,20 @@ type
     property Thread: TThread read FThread;
   end;
 
+  { TExecutorHelper }
+
+  TExecutorHelper = class helper for TExecutor
+  public
+    procedure Await(ATask: TTask; FreeTask: Boolean = True); overload;
+    generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload;
+  end;
+
 
 function GetExecutor: TExecutor; {$IFDEF inlining}inline;{$ENDIF}
-procedure Await(ATask: TTask; FreeTask: Boolean = True);
-generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
+procedure RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True);
+procedure ScheduleForAwait(ATask: TTask);
+procedure Await(ATask: TTask; FreeTask: Boolean = True); overload;
+generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload;
 procedure Yield;
 procedure AsyncSleep(time: QWord);
 
@@ -168,6 +182,26 @@ implementation
 function GetExecutor: TExecutor;
 begin
   Result := TExecutor.GetExecutor(TThread.CurrentThread.ThreadID);
+end;
+
+procedure RunAsync(ATask: TTask; FreeTask: Boolean; RaiseErrors: Boolean);
+var
+  Executor: TExecutor;
+begin
+  Executor := GetExecutor;
+  if not Assigned(Executor) then
+    raise ENotATaskException.Create('RunAsync can only be called from within a Task');
+  Executor.RunAsync(ATask, FreeTask, RaiseErrors);
+end;
+
+procedure ScheduleForAwait(ATask: TTask);
+var
+  Executor: TExecutor;
+begin
+  Executor := GetExecutor;
+  if not Assigned(Executor) then
+    raise ENotATaskException.Create('ScheduleForAwait can only be called from within a Task');
+  Executor.ScheduleForAwait(ATask);
 end;
 
 procedure Await(ATask: TTask; FreeTask: Boolean);
@@ -187,12 +221,7 @@ begin
   Executor := GetExecutor;
   if not Assigned(Executor) then
     raise ENotATaskException.Create('Await can only be called from within a Task');
-  try
-    Executor.Await(ATask, False);
-    Result := ATask.TaskResult;
-  finally
-    if FreeTask then ATask.Free;
-  end;
+  Result := Executor.specialize Await<TResult>(ATask, FreeTask);
 end;
 
 procedure Yield;
@@ -219,6 +248,7 @@ end;
 
 constructor EUnhandledError.Create(AError: Exception; ATask: TTask);
 begin
+  inherited Create(AError.Message);
   Error := AError;
   Task := ATask;
 end;
@@ -234,22 +264,34 @@ end;
 class constructor TExecutor.InitStatics;
 begin
   ThreadExecutorMap := TThreadExecutorMap.Create;
+  InitCriticalSection(ExecutorMapCriticalSection);
 end;
 
 class destructor TExecutor.CleanupStatics;
 begin
+  DoneCriticalSection(ExecutorMapCriticalSection);
   ThreadExecutorMap.Free;
 end;
 
 class procedure TExecutor.RegisterExecutor(ThreadID: TThreadID;
   Executor: TExecutor);
 begin
-  ThreadExecutorMap.Add(ThreadID, Executor);
+  EnterCriticalSection(ExecutorMapCriticalSection);
+  try
+    ThreadExecutorMap.Add(ThreadID, Executor);
+  finally
+    LeaveCriticalSection(ExecutorMapCriticalSection);
+  end;
 end;
 
 class procedure TExecutor.RemoveExecutor(Executor: TExecutor);
 begin
-  ThreadExecutorMap.Remove(Executor.Thread.ThreadID)
+  EnterCriticalSection(ExecutorMapCriticalSection);
+  try
+    ThreadExecutorMap.Remove(Executor.Thread.ThreadID);
+  finally
+    LeaveCriticalSection(ExecutorMapCriticalSection);
+  end;
 end;
 
 class function TExecutor.GetExecutor(ThreadID: Integer): TExecutor;
@@ -259,8 +301,6 @@ begin
 end;
 
 procedure TExecutor.RaiseErrorHandler(Task: TTask);
-var
-  err: Exception;
 begin
   if FErrorHandler.isFirst then
     FErrorHandler.First()(Task, Task.Error)
@@ -337,13 +377,21 @@ begin
   ScheduleTask(NewEntry);
 end;
 
-procedure TExecutor.Await(ATask: TTask; FreeTask: Boolean);
+procedure TExecutor.ScheduleForAwait(ATask: TTask);
+begin
+  RunAsync(ATask, False, False);
+end;
+
+procedure TExecutorHelper.Await(ATask: TTask; FreeTask: Boolean);
 begin
   if (TThread.CurrentThread <> FThread) or not Assigned(FCurrentTask) then
     raise ENotATaskException.Create('Can only await inside a task');
   try
     // schedule task to await
-    RunAsync(ATask, False, False);
+    if ATask.Status = tsNone then
+      ScheduleForAwait(ATask)
+    else if ATask.Executor <> Self then
+      raise EForeignTaskException.Create('Can''t await a task from another executor');
     // while not finished, yield to the scheduler to continue the q
     while ATask.Status < tsFinished do
       FCurrentTask.Yield;
@@ -355,7 +403,7 @@ begin
   end;
 end;
 
-{generic function TExecutor.Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
+generic function TExecutorHelper.Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
 begin
   try
     Self.Await(ATask, False);
@@ -364,7 +412,7 @@ begin
     if FreeTask then
       ATask.Free;
   end;
-end;}
+end;
 
 procedure TExecutor.Yield;
 begin
@@ -430,6 +478,7 @@ end;
 class constructor TTask.InitStatics;
 begin
   TTask.StackCache := TStackCache.Create;
+  InitCriticalSection(CacheCriticalSection);
 end;
 
 class destructor TTask.CleanupStatics;
@@ -438,33 +487,42 @@ var
 begin
   for st in TTask.StackCache do
     Freemem(st.Memory);
+  DoneCriticalSection(CacheCriticalSection);
   TTask.StackCache.Free;
 end;
 
 class function TTask.AllocStack(ASize: SizeInt): TStackData;
 begin
-  if (ASize = DefaultTaskStackSize) and (TTask.StackCache.Count > 0) then
-    Result := TTask.StackCache.ExtractIndex(TTask.StackCache.Count - 1)
-  else
-  begin
-    Result.Size := ASize;
-    Result.Memory := GetMem(ASize);
+  EnterCriticalSection(CacheCriticalSection);
+  try
+    if (ASize = DefaultTaskStackSize) and (TTask.StackCache.Count > 0) then
+      Result := TTask.StackCache.ExtractIndex(TTask.StackCache.Count - 1)
+    else
+    begin
+      Result.Size := ASize;
+      Result.Memory := GetMem(ASize);
+    end;
+  finally
+    LeaveCriticalSection(CacheCriticalSection);
   end;
 end;
 
 class procedure TTask.FreeStack(constref AStackData: TStackData);
 begin
   if not Assigned(AStackData.Memory) then Exit;
-  if AStackData.Size = DefaultTaskStackSize then
-    TTask.StackCache.Add(AStackData)
-  else
-    FreeMem(AStackData.Memory, AStackData.Size);
+  EnterCriticalSection(CacheCriticalSection);
+  try
+    if AStackData.Size = DefaultTaskStackSize then
+      TTask.StackCache.Add(AStackData)
+    else
+      FreeMem(AStackData.Memory, AStackData.Size);
+  finally
+    LeaveCriticalSection(CacheCriticalSection);
+  end;
 end;
 {$EndIf}
 
 procedure TTask.DoExecute;
-label
-  exception_hack;
 begin
   // Start the execution
   FStatus := tsRunning;
@@ -472,15 +530,10 @@ begin
     Execute;
     FStatus := tsFinished;
   except on E: Exception do begin
-    FError := E;
+    FError := Exception(AcquireExceptionObject);
     FStatus := tsError;
-    {$AsmMode intel}
-    asm
-    JMP exception_hack
-    end;
   end
   end;
-exception_hack:
 end;
 
 constructor TTask.Create(AStackSize: SizeInt);
@@ -514,9 +567,11 @@ begin
 end;
 
 procedure TTask.Run(AExecutor: TExecutor);
+{$IfNDef Windows}
 var
   StackPtr, BasePtr, NewStackPtr, NewBasePtr: Pointer;
   FrameSize: SizeInt;
+{$EndIf}
 begin
   FExecutor := AExecutor;
   {$IfDef WINDOWS}

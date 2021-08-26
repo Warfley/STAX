@@ -5,7 +5,7 @@ unit stax.tasks.io.console;
 interface
 
 uses
-  SysUtils, stax, stax.tasks.io, Compatibility;
+  SysUtils, stax, stax.tasks.io, Compatibility.Console;
 
 type
 

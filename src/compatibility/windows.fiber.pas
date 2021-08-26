@@ -4,6 +4,8 @@ unit windows.fiber;
 
 interface
 
+{$IfDef WINDOWS}
+
 uses
   SysUtils, windows;
 
@@ -23,12 +25,15 @@ function CreateFiber(dwStackSize: SIZE_T; lpStartAddress: LPFIBER_START_ROUTINE;
 function ConvertThreadToFiber(lpParameter: LPVOID): TFiber; stdcall; external 'kernel32' name 'ConvertThreadToFiber';
 
 function LastFiberError: DWORD; inline;
-implementation
 
+{$EndIf}
+implementation
+{$IfDef WINDOWS}
 function LastFiberError: DWORD;
 begin
   Result := GetLastError;
 end;
+{$EndIf}
 
 end.
 

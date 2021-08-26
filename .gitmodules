@@ -1,3 +1,0 @@
-[submodule "external/LazTermUtils"]
-	path = external/LazTermUtils
-	url = git@github.com:Warfley/LazTermUtils.git

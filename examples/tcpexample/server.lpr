@@ -3,7 +3,7 @@ program server;
 {$mode objfpc}{$H+}
 
 uses
-  stax, Sockets, stax.tasks.functional, stax.tasks.io.tcp;
+  Sockets, stax, stax.tasks.io.tcp, stax.tasks.functional;
 
 // simple tcp echo server
 procedure HandleConnection(AExecutor: TExecutor; AConnection: TSocket);
@@ -44,7 +44,12 @@ var
 begin
   exec := TExecutor.Create;
   exec.RunAsync(specialize AsyncProcedure<String, Integer>(@RunServer, '0.0.0.0', 1337));
-  exec.Run;
+  try
+    exec.Run;
+  except on E: EUnhandledError do
+    WriteLn('Unhandled error: ', E.Message);
+  end;
   exec.Free;
+  ReadLn;
 end.
 

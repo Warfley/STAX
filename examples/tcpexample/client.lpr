@@ -43,7 +43,12 @@ var
 begin
   exec := TExecutor.Create;
   exec.RunAsync(specialize AsyncProcedure<String, Integer>(@ConnectToServer, '127.0.0.1', 1337));
-  exec.Run;
+  try
+    exec.Run;
+  except on E: EUnhandledError do
+    WriteLn('Unhandled Error: ', E.Error.Message);
+  end;
   exec.Free;
+  ReadLn;
 end.
 

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="4">
+    <PathDelim Value="\"/>
+    <Name Value="StaxPKG"/>
+    <Type Value="RunAndDesignTime"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <PathDelim Value="\"/>
+      <SearchPaths>
+        <OtherUnitFiles Value="src;src\tasks\functional;src\tasks\io;src\tasks\io\networking;src\compatibility"/>
+        <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
+      </SearchPaths>
+    </CompilerOptions>
+    <Files Count="10">
+      <Item1>
+        <Filename Value="src\stax.pas"/>
+        <UnitName Value="stax"/>
+      </Item1>
+      <Item2>
+        <Filename Value="src\stax.helpertypes.pas"/>
+        <UnitName Value="stax.helpertypes"/>
+      </Item2>
+      <Item3>
+        <Filename Value="src\tasks\functional\stax.tasks.functional.pas"/>
+        <UnitName Value="stax.tasks.functional"/>
+      </Item3>
+      <Item4>
+        <Filename Value="src\tasks\functional\stax.tasks.functional.functions.pas"/>
+        <UnitName Value="stax.tasks.functional.functions"/>
+      </Item4>
+      <Item5>
+        <Filename Value="src\tasks\functional\stax.tasks.functional.procedures.pas"/>
+        <UnitName Value="stax.tasks.functional.procedures"/>
+      </Item5>
+      <Item6>
+        <Filename Value="src\tasks\io\stax.tasks.io.pas"/>
+        <UnitName Value="stax.tasks.io"/>
+      </Item6>
+      <Item7>
+        <Filename Value="src\tasks\io\stax.tasks.io.console.pas"/>
+        <UnitName Value="stax.tasks.io.console"/>
+      </Item7>
+      <Item8>
+        <Filename Value="src\tasks\io\networking\stax.tasks.io.tcp.pas"/>
+        <UnitName Value="stax.tasks.io.tcp"/>
+      </Item8>
+      <Item9>
+        <Filename Value="src\compatibility\windows.fiber.pas"/>
+        <UnitName Value="windows.fiber"/>
+      </Item9>
+      <Item10>
+        <Filename Value="src\compatibility\compatibility.console.pas"/>
+        <UnitName Value="Compatibility.Console"/>
+      </Item10>
+    </Files>
+    <RequiredPkgs Count="1">
+      <Item1>
+        <PackageName Value="FCL"/>
+      </Item1>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+      <UseFileFilters Value="True"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>

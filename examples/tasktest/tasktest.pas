@@ -3,9 +3,7 @@ program tasktest;
 {$mode objfpc}{$H+}
 
 uses
-  {$IFDEF UNIX}
-  cthreads,{$ENDIF}
-  Classes, SysUtils, stax, stax.tasks.functional;
+  SysUtils, Stax, Stax.tasks.functional;
 
 procedure AsyncWrite(AExecutor: TExecutor; ALine: String);
 begin

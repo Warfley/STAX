@@ -96,7 +96,7 @@ generic function Pair<TFirst, TSecond>(AFirst: TFirst; ASecond: TSecond): specia
 
 implementation
 
-function EmptyOptional: TNoneType;
+{$Warnings OFF}function EmptyOptional: TNoneType;
 begin
   //noop
 end;
@@ -105,6 +105,7 @@ function EmptyUnion: TNoneType;
 begin
   //noop
 end;
+{$Warnings ON}
 
 generic function Pair<TFirst, TSecond>(AFirst: TFirst; ASecond: TSecond): specialize TPair<TFirst, TSecond>;
 begin
