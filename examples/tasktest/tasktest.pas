@@ -15,7 +15,7 @@ begin
   Result := '%s: %d'.Format([AName, ANumber]);
 end;
 
-procedure AsyncCount(AExecutor: TExecutor; AName: String);
+procedure AsyncCount(AExecutor: TExecutor; AName: String; SleepTime: Integer);
 var
   i: Integer;
   line: String;
@@ -24,6 +24,7 @@ begin
   begin
     Line := specialize Await<String>(specialize AsyncFunction<String, String, Integer>(@AsyncConcat, AName, i));
     Await(specialize AsyncProcedure<String>(@AsyncWrite, Line));
+    AsyncSleep(SleepTime);
   end;
 end;
 
@@ -31,8 +32,8 @@ var
   exec: TExecutor;
 begin
   exec := TExecutor.Create;
-  exec.RunAsync(specialize AsyncProcedure<String>(@AsyncCount, 'C1'));
-  exec.RunAsync(specialize AsyncProcedure<String>(@AsyncCount, 'C2'));
+  exec.RunAsync(specialize AsyncProcedure<String, Integer>(@AsyncCount, 'C1', 1000));
+  exec.RunAsync(specialize AsyncProcedure<String, Integer>(@AsyncCount, 'C2', 500));
   exec.Run;
   exec.Free;
   ReadLn;

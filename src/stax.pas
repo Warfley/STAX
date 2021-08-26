@@ -5,20 +5,57 @@ unit stax;
 interface
 
 uses
-  Classes, SysUtils, Generics.Collections, stax.helpertypes
+  Classes, SysUtils, math, gpriorityqueue, Generics.Collections, stax.helpertypes
   {$IfDef WINDOWS}, windows.fiber{$EndIf};
 
 type
+  // Forward definitions
   TExecutor = class;
+  TTask = class;
 
+  // Exceptions
   ETaskTerminatedException = class(Exception);
   ETaskNotActiveException = class(Exception);
+  EForeignTaskException = class(Exception);
+  ETaskAlreadyScheduledException = class(Exception);
+  ENotATaskException = class(Exception);
 
-  TTaskStatus = (tsNone=0, tsScheduled, tsRescheduled, tsRunning, tsFinished, tsError);
+  { EUnhandledError }
+
+  EUnhandledError = class(Exception)
+  public
+    Error: Exception;
+    Task: TTask;
+
+    constructor Create(AError: Exception; ATask: TTask);
+    destructor Destroy; override;
+  end;
+
+  // Error handler
+  TErrorFunction = procedure(Task: TTask; E: Exception);
+  TErrorMethod = procedure(Task: TTask; E: Exception) of object;
+  TErrorHandler = specialize TUnion<TErrorFunction, TErrorMethod>;
+
+  { TDependable }
+
+  TDependable = class
+  private type
+    TTaskList = specialize TList<TTask>;
+  private
+    FDependingTasks: TTaskList;
+  protected
+    procedure AddDependingTask(ATask: TTask); inline;
+    procedure ResolveDependencies; // maybe virtual?
+  public
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
+  TTaskStatus = (tsNone=0, tsScheduled, tsRescheduled, tsWaiting, tsRunning, tsFinished, tsError);
 
   { TTask }
 
-  TTask = class
+  TTask = class(TDependable)
   // Maybe this is too much?
   public const DefaultTaskStackSize = DefaultStackSize;
   private type
@@ -42,6 +79,8 @@ type
     class procedure FreeStack(constref AStackData: TStackData); static; {$IFDEF inlining}inline;{$ENDIF}
   {$EndIf}
   private
+    FAutoFree: Boolean;
+    FRaiseExceptions: Boolean;
     FError: Exception;
     FStatus: TTaskStatus;
     FExecutor: TExecutor;
@@ -53,6 +92,10 @@ type
     FTaskEnv: jmp_buf;
     {$EndIf}
     procedure DoExecute;
+    procedure Schedule(AExecutor: TExecutor; AutoFree: Boolean;
+      RaiseExceptions: Boolean);
+    procedure Reschedule; {$IFDEF inlining}inline;{$ENDIF}
+    procedure DependencyResolved(ADependency: TDependable); {$IFDEF inlining}inline;{$ENDIF}
   protected
     procedure Execute; virtual; abstract;
   public
@@ -61,9 +104,12 @@ type
 
     procedure Terminate; {$IFDEF inlining}inline;{$ENDIF}
 
-    procedure Run(AExecutor: TExecutor);
+    procedure Run;
     procedure Resume;
     procedure Yield;
+    // because forward declarations of generics make fpc crash, this is put in a helper
+    //procedure Await(ATask: TTask; FreeTask: Boolean = True); overload;
+    //generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload;
     procedure Sleep(Time: QWord);
     procedure Stop; {$IFDEF inlining}inline;{$ENDIF}
 
@@ -86,37 +132,25 @@ type
     property TaskResult: T read FResult;
   end;
 
-  TErrorFunction = procedure(Task: TTask; E: Exception);
-  TErrorMethod = procedure(Task: TTask; E: Exception) of object;
-  TErrorHandler = specialize TUnion<TErrorFunction, TErrorMethod>;
-
-  { EUnhandledError }
-
-  EUnhandledError = class(Exception)
+  TTaskHelper = class helper for TTask
   public
-    Error: Exception;
-    Task: TTask;
-
-    constructor Create(AError: Exception; ATask: TTask);
-    destructor Destroy; override;
+    procedure Await(ATask: TTask; FreeTask: Boolean = True); overload;
+    generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload;
   end;
-
-  TTaskQueueEntry = record
-    Task: TTask;
-    FreeTask: Boolean;
-    RaiseError: Boolean;
-  end;
-
-  TTaskQueue = specialize TQueue<TTaskQueueEntry>;
-
-  EForeignTaskException = class(Exception);
-  ETaskAlreadyScheduledException = class(Exception);
-  ENotATaskException = class(Exception);
 
   { TExecutor }
 
   TExecutor = class
   private type
+    TTaskQueue = specialize TQueue<TTask>;
+    TSleepQueueEntry = specialize TPair<QWord, TTask>;
+
+    { TSleepQueueComparator }
+
+    TSleepQueueComparator = class
+      public class function c(constref A, B: TSleepQueueEntry): Boolean; static; inline;
+    end;
+    TSleepQueue = specialize TPriorityQueue<TSleepQueueEntry, TSleepQueueComparator>;
     TThreadExecutorMap = specialize TDictionary<TThreadID, TExecutor>;
   private
     class var ThreadExecutorMap: TThreadExecutorMap;
@@ -130,6 +164,7 @@ type
   private
     FErrorHandler: TErrorHandler;
     FTaskQueue: TTaskQueue;
+    FSleepQueue: TSleepQueue;
     FCurrentTask: TTask;
     {$IfDef Windows}
     FFiber: TFiber;
@@ -139,109 +174,358 @@ type
     FThread: TThread;
 
     procedure RaiseErrorHandler(Task: TTask); {$IFDEF inlining}inline;{$ENDIF}
-    procedure ScheduleTask(constref QueueEntry: TTaskQueueEntry);
+    procedure ScheduleTask(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
     procedure ExecTask(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
-    procedure FinalizeTask(ATask: TTaskQueueEntry);
+    procedure FinalizeTask(ATask: TTask);
+    function HandleSleepQueue: QWord;
+    procedure QueueSleep(ATask: TTask; ATime: QWord); {$IFDEF inlining}inline;{$ENDIF}
   public
     constructor Create;
     destructor Destroy; override;
 
     procedure RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True);
-    procedure ScheduleForAwait(ATask: TTask); inline;
+    procedure ScheduleForAwait(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
     // For some reason this breaks fpc, so we added this as a type helper
     //procedure Await(ATask: TTask; FreeTask: Boolean = True);
     //generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
-    procedure Yield;
-    procedure Sleep(time: QWord);
+    procedure Yield; {$IFDEF inlining}inline;{$ENDIF}
+    procedure Sleep(time: QWord); {$IFDEF inlining}inline;{$ENDIF}
 
     procedure Run;
 
     property OnError: TErrorHandler read FErrorHandler write FErrorHandler;
     property Thread: TThread read FThread;
+    property CurrentTask: TTask read FCurrentTask;
   end;
 
   { TExecutorHelper }
 
   TExecutorHelper = class helper for TExecutor
   public
-    procedure Await(ATask: TTask; FreeTask: Boolean = True); overload;
-    generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload;
+    procedure Await(ATask: TTask; FreeTask: Boolean = True); overload; {$IFDEF inlining}inline;{$ENDIF}
+    generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload; {$IFDEF inlining}inline;{$ENDIF}
   end;
 
 
 function GetExecutor: TExecutor; {$IFDEF inlining}inline;{$ENDIF}
-procedure RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True);
-procedure ScheduleForAwait(ATask: TTask);
-procedure Await(ATask: TTask; FreeTask: Boolean = True); overload;
-generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload;
-procedure Yield;
-procedure AsyncSleep(time: QWord);
+procedure RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True); {$IFDEF inlining}inline;{$ENDIF}
+procedure ScheduleForAwait(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
+procedure Await(ATask: TTask; FreeTask: Boolean = True); overload; {$IFDEF inlining}inline;{$ENDIF}
+generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload; {$IFDEF inlining}inline;{$ENDIF}
+procedure Yield; {$IFDEF inlining}inline;{$ENDIF}
+procedure AsyncSleep(time: QWord); {$IFDEF inlining}inline;{$ENDIF}
 
 implementation
 
-function GetExecutor: TExecutor;
+{$Region TDependable}
+
+{ TDependable }
+
+procedure TDependable.AddDependingTask(ATask: TTask);
 begin
-  Result := TExecutor.GetExecutor(TThread.CurrentThread.ThreadID);
+  FDependingTasks.Add(ATask);
 end;
 
-procedure RunAsync(ATask: TTask; FreeTask: Boolean; RaiseErrors: Boolean);
+procedure TDependable.ResolveDependencies;
 var
-  Executor: TExecutor;
+  ATask: TTask;
 begin
-  Executor := GetExecutor;
-  if not Assigned(Executor) then
-    raise ENotATaskException.Create('RunAsync can only be called from within a Task');
-  Executor.RunAsync(ATask, FreeTask, RaiseErrors);
+  for ATask in FDependingTasks do
+    ATask.DependencyResolved(Self);
 end;
 
-procedure ScheduleForAwait(ATask: TTask);
-var
-  Executor: TExecutor;
+constructor TDependable.Create;
 begin
-  Executor := GetExecutor;
-  if not Assigned(Executor) then
-    raise ENotATaskException.Create('ScheduleForAwait can only be called from within a Task');
-  Executor.ScheduleForAwait(ATask);
+  FDependingTasks := TTaskList.Create;
 end;
 
-procedure Await(ATask: TTask; FreeTask: Boolean);
-var
-  Executor: TExecutor;
+destructor TDependable.Destroy;
 begin
-  Executor := GetExecutor;
-  if not Assigned(Executor) then
-    raise ENotATaskException.Create('Await can only be called from within a Task');
-  Executor.Await(ATask, FreeTask);
+  FDependingTasks.Free;
+  inherited Destroy;
 end;
 
-generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
-var
-  Executor: TExecutor;
+{$EndRegion TDependable}
+
+{$Region TTask}
+
+{ TTask }
+
+{$IfDef WINDOWS}
+procedure FiberEntryPoint(lpFiberParameter: Pointer); stdcall;
 begin
-  Executor := GetExecutor;
-  if not Assigned(Executor) then
-    raise ENotATaskException.Create('Await can only be called from within a Task');
-  Result := Executor.specialize Await<TResult>(ATask, FreeTask);
+  TTask(lpFiberParameter).DoExecute;
+  // return to scheduler
+  SwitchToFiber(TTask(lpFiberParameter).Executor.FFiber);
 end;
 
-procedure Yield;
-var
-  Executor: TExecutor;
+{$Else}
+
+class constructor TTask.InitStatics;
 begin
-  Executor := GetExecutor;
-  if not Assigned(Executor) then
-    raise ENotATaskException.Create('Yield can only be called from within a Task');
-  Executor.Yield;
+  TTask.StackCache := TStackCache.Create;
+  InitCriticalSection(CacheCriticalSection);
 end;
 
-procedure AsyncSleep(time: QWord);
+class destructor TTask.CleanupStatics;
 var
-  Executor: TExecutor;
+  st: TStackData;
 begin
-  Executor := GetExecutor;
-  if not Assigned(Executor) then
-    raise ENotATaskException.Create('AsyncSleep can only be called from within a Task');
-  Executor.Sleep(time);
+  for st in TTask.StackCache do
+    Freemem(st.Memory);
+  DoneCriticalSection(CacheCriticalSection);
+  TTask.StackCache.Free;
+end;
+
+class function TTask.AllocStack(ASize: SizeInt): TStackData;
+begin
+  EnterCriticalSection(CacheCriticalSection);
+  try
+    if (ASize = DefaultTaskStackSize) and (TTask.StackCache.Count > 0) then
+      Result := TTask.StackCache.ExtractIndex(TTask.StackCache.Count - 1)
+    else
+    begin
+      Result.Size := ASize;
+      Result.Memory := GetMem(ASize);
+    end;
+  finally
+    LeaveCriticalSection(CacheCriticalSection);
+  end;
+end;
+
+class procedure TTask.FreeStack(constref AStackData: TStackData);
+begin
+  if not Assigned(AStackData.Memory) then Exit;
+  EnterCriticalSection(CacheCriticalSection);
+  try
+    if AStackData.Size = DefaultTaskStackSize then
+      TTask.StackCache.Add(AStackData)
+    else
+      FreeMem(AStackData.Memory, AStackData.Size);
+  finally
+    LeaveCriticalSection(CacheCriticalSection);
+  end;
+end;
+{$EndIf}
+
+procedure TTask.DoExecute;
+begin
+  try
+  // Start the execution
+  FStatus := tsRunning;
+  try
+      Execute;
+      FStatus := tsFinished;
+    except on E: Exception do begin
+      FError := Exception(AcquireExceptionObject);
+      FStatus := tsError;
+    end
+    end;
+  finally
+    // After we finished execution, notify all tasks depending on us
+    ResolveDependencies;
+  end;
+end;
+
+procedure TTask.Schedule(AExecutor: TExecutor; AutoFree: Boolean; RaiseExceptions: Boolean);
+begin
+  FExecutor := AExecutor;
+  FAutoFree := AutoFree;
+  FRaiseExceptions := RaiseExceptions;
+  FStatus := tsScheduled;
+  AExecutor.ScheduleTask(Self);
+end;
+
+procedure TTask.Reschedule;
+begin
+  FStatus := tsRescheduled;
+  FExecutor.ScheduleTask(Self);
+end;
+
+procedure TTask.DependencyResolved(ADependency: TDependable);
+begin
+  // currently the only dependency we have is awaiting some other task, therefore
+  // if we finished awaiting, we can simply reschedule ourselves
+  if FStatus <> tsWaiting then
+    raise ETaskAlreadyScheduledException.Create('Can only reschedule a waiting task');
+  Reschedule;
+end;
+
+constructor TTask.Create(AStackSize: SizeInt);
+begin
+  inherited Create;
+  FTerminated := False;
+  FError := nil;
+  FStatus := tsNone;
+  FExecutor := nil;
+  {$IfDef Windows}
+  FFiber.Fiber:=nil;
+  FFiber.StackSize := AStackSize;
+  {$Else}
+  // We don't allocate the stack now, so if another task before this one finishes
+  // we might be able to reuse it's memory before allocating new one
+  FStack.Size := AStackSize;
+  FStack.Memory := nil;
+  {$EndIf}
+end;
+
+destructor TTask.Destroy;
+begin
+  {$IfDef WINDOWS}
+  if Assigned(FFiber.Fiber) then
+    DeleteFiber(FFiber.Fiber);
+  {$Else}
+  TTask.FreeStack(FStack);
+  {$EndIf}
+  if Assigned(FError) then
+    FError.Free;
+  inherited Destroy;
+end;
+
+procedure TTask.Run;
+{$IfNDef Windows}
+var
+  StackPtr, BasePtr, NewStackPtr, NewBasePtr: Pointer;
+  FrameSize: SizeInt;
+{$EndIf}
+begin
+  {$IfDef WINDOWS}
+  FFiber.Fiber := CreateFiber(FFiber.StackSize, @FiberEntryPoint, Self);
+  if not Assigned(FFiber.Fiber) then
+    raise EFiberError.Create('Cannot create fiber: ' + LastFiberError.ToString);
+  SwitchToFiber(FFiber.Fiber);
+  {$Else}
+  // setup stack
+  if not Assigned(FStack.Memory) then
+    FStack := TTask.AllocStack(FStack.Size);
+  // copy current frame so we can use local variables and arguments
+  {$AsmMode intel}
+  asm
+  MOV StackPtr, RSP
+  MOV BasePtr, RBP
+  end;
+  FrameSize := BasePtr - StackPtr;
+  NewBasePtr := FStack.Memory + FStack.Size;
+  NewStackPtr := NewBasePtr - FrameSize;
+  Move(PByte(StackPtr)^, PByte(NewStackPtr)^, FrameSize);
+  // move to new stack
+  asm
+  MOV RSP, NewStackPtr
+  MOV RBP, NewBasePtr
+  end;
+  DoExecute;
+  longjmp(AExecutor.FSchedulerEnv, 1);
+  {$EndIf}
+end;
+
+procedure TTask.Resume;
+begin
+  FStatus := tsRunning;
+  {$IfDef WINDOWS}
+  SwitchToFiber(FFiber.Fiber);
+  {$Else}
+  longjmp(FTaskEnv, 1);
+  {$EndIf}
+end;
+
+procedure TTask.Yield;
+begin
+  if FExecutor.FCurrentTask <> Self then
+    raise ETaskNotActiveException.Create('Only an active task can yield');
+  {$IfDef Windows}
+  SwitchToFiber(Executor.FFiber);
+  {$Else}
+  // store current state:
+  if setjmp(FTaskEnv) = 0 then
+    // go to scheduler
+    longjmp(FExecutor.FSchedulerEnv, 1);
+  {$EndIf}
+  // On return, check if we got terminated, if so notify task via exception
+  if Terminated then
+    raise ETaskTerminatedException.Create('Task terminated during waiting');
+end;
+
+procedure TTaskHelper.Await(ATask: TTask; FreeTask: Boolean);
+begin
+  try
+    // schedule task to await
+    if ATask.Status = tsNone then
+      ScheduleForAwait(ATask)
+    else if ATask.Executor <> FExecutor then
+      raise EForeignTaskException.Create('Can''t await a task from another executor');
+    // if the task was already earlier it might already be finished
+    // but we only need to wait if it wasnt finished
+    if ATask.Status < tsFinished then
+    begin
+      // add as dependency to that task in order to be notified when it finishes
+      ATask.AddDependingTask(Self);
+      // then wait until we are woken up
+      FStatus := tsWaiting;
+      Yield;
+    end;
+    // Check for errors
+    if ATask.Status = tsError then
+      raise ATask.ExtractError;
+  finally
+    if FreeTask then
+      ATask.Free;
+  end;
+end;
+
+generic function TTaskHelper.Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
+begin
+  try
+    Self.Await(ATask, False);
+    Result := ATask.TaskResult;
+  finally
+    if FreeTask then
+      ATask.Free;
+  end;
+end;
+
+procedure TTask.Sleep(Time: QWord);
+begin
+  if FExecutor.FCurrentTask <> Self then
+    raise ETaskNotActiveException.Create('Only an active task can go to sleep');
+  FStatus := tsWaiting;
+  FExecutor.QueueSleep(Self, Time);
+  Yield;
+end;
+
+procedure TTask.Stop;
+begin
+  Terminate;
+  Yield;
+end;
+
+function TTask.ExtractError: Exception;
+begin
+  Result := FError;
+  FError := nil;
+end;
+
+procedure TTask.Terminate;
+begin
+  FTerminated := True;
+end;
+
+{ TRVTask }
+
+procedure TRVTask.Execute;
+begin
+  FResult := Default(T);
+end;
+
+{$EndRegion TTask}
+
+{$Region TExecutor}
+
+{ TExecutor.TSleepQueueComparator }
+
+class function TExecutor.TSleepQueueComparator.c(constref A, B: TSleepQueueEntry
+  ): Boolean;
+begin
+  Result := A.First > B.First;
 end;
 
 { EUnhandledError }
@@ -310,13 +594,9 @@ begin
     raise EUnhandledError.Create(Task.ExtractError, Task);
 end;
 
-procedure TExecutor.ScheduleTask(constref QueueEntry: TTaskQueueEntry);
+procedure TExecutor.ScheduleTask(ATask: TTask);
 begin
-  FTaskQueue.Enqueue(QueueEntry);
-  if QueueEntry.Task.Status = tsNone then
-    QueueEntry.Task.FStatus := tsScheduled
-  else
-    QueueEntry.Task.FStatus := tsRescheduled;
+  FTaskQueue.Enqueue(ATask);
 end;
 
 procedure TExecutor.ExecTask(ATask: TTask);
@@ -333,25 +613,50 @@ begin
   if ATask.Status = tsRescheduled then
     ATask.Resume
   else
-    ATask.Run(Self);
+    ATask.Run;
   FCurrentTask := nil;
 end;
 
-procedure TExecutor.FinalizeTask(ATask: TTaskQueueEntry);
+procedure TExecutor.FinalizeTask(ATask: TTask);
 begin
   try
     // handle errors
-    if ATask.RaiseError and (ATask.Task.Status = tsError) then
-      RaiseErrorHandler(ATask.Task);
+    if ATask.FRaiseExceptions and (ATask.Status = tsError) then
+      RaiseErrorHandler(ATask);
   finally
-    if ATask.FreeTask then
-      ATask.Task.Free;
+    if ATask.FAutoFree then
+      ATask.Free;
   end;
+end;
+
+function TExecutor.HandleSleepQueue: QWord;
+var
+  CurrTime: QWord;
+begin
+  CurrTime := GetTickCount64;
+  while not FSleepQueue.IsEmpty and (FSleepQueue.Top.First <= CurrTime) do
+  begin
+    FSleepQueue.Top.Second.Reschedule;
+    FSleepQueue.Pop;
+  end;
+  if FSleepQueue.IsEmpty then
+    Result := 0
+  else
+    Result := FSleepQueue.Top.First - CurrTime;
+end;
+
+procedure TExecutor.QueueSleep(ATask: TTask; ATime: QWord);
+var
+  EndTime: QWord;
+begin
+  EndTime := GetTickCount64 + ATime;
+  FSleepQueue.Push(specialize Pair<QWord, TTask>(EndTime, ATask));
 end;
 
 constructor TExecutor.Create;
 begin
   FTaskQueue := TTaskQueue.Create;
+  FSleepQueue := TSleepQueue.Create;
   FCurrentTask := nil;
   FThread := nil;
 end;
@@ -359,22 +664,18 @@ end;
 destructor TExecutor.Destroy;
 begin
   // TODO: handle currently active and scheduled tasks
+  FSleepQueue.Free;
   FTaskQueue.Free;
   inherited Destroy;
 end;
 
 procedure TExecutor.RunAsync(ATask: TTask; FreeTask: Boolean;
   RaiseErrors: Boolean);
-var
-  NewEntry: TTaskQueueEntry;
 begin
   if ATask.Status <> tsNone then
     raise ETaskAlreadyScheduledException.Create('Task already scheduled');
   ATask.FExecutor := Self;
-  NewEntry.Task := ATask;
-  NewEntry.FreeTask := FreeTask;
-  NewEntry.RaiseError := RaiseErrors;
-  ScheduleTask(NewEntry);
+  ATask.Schedule(self, FreeTask, RaiseErrors);
 end;
 
 procedure TExecutor.ScheduleForAwait(ATask: TTask);
@@ -386,32 +687,14 @@ procedure TExecutorHelper.Await(ATask: TTask; FreeTask: Boolean);
 begin
   if (TThread.CurrentThread <> FThread) or not Assigned(FCurrentTask) then
     raise ENotATaskException.Create('Can only await inside a task');
-  try
-    // schedule task to await
-    if ATask.Status = tsNone then
-      ScheduleForAwait(ATask)
-    else if ATask.Executor <> Self then
-      raise EForeignTaskException.Create('Can''t await a task from another executor');
-    // while not finished, yield to the scheduler to continue the q
-    while ATask.Status < tsFinished do
-      FCurrentTask.Yield;
-    if ATask.Status = tsError then
-      raise ATask.ExtractError;
-  finally
-    if FreeTask then
-      ATask.Free;
-  end;
+  FCurrentTask.Await(ATask, FreeTask);
 end;
 
 generic function TExecutorHelper.Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
 begin
-  try
-    Self.Await(ATask, False);
-    Result := ATask.TaskResult;
-  finally
-    if FreeTask then
-      ATask.Free;
-  end;
+  if (TThread.CurrentThread <> FThread) or not Assigned(FCurrentTask) then
+    raise ENotATaskException.Create('Can only await inside a task');
+  Result := FCurrentTask.specialize Await<TResult>(ATask, FreeTask);
 end;
 
 procedure TExecutor.Yield;
@@ -430,7 +713,8 @@ end;
 
 procedure TExecutor.Run;
 var
-  NextTask: TTaskQueueEntry;
+  NextTask: TTask;
+  SleepTime: QWord;
 begin
   FThread := TThread.CurrentThread;
   RegisterExecutor(FThread.ThreadID, self);
@@ -439,15 +723,27 @@ begin
   if not Assigned(FFiber) then
     raise EFiberError.Create('Error calling ConvertThreadToFiber: ' + LastFiberError.ToString);
   {$EndIf}
-  while FTaskQueue.Count > 0 do
+  while (FTaskQueue.Count > 0) or not FSleepQueue.IsEmpty do
   begin
-    NextTask := FTaskQueue.Extract;
-    ExecTask(NextTask.Task);
-    // if task is not finished, reschedule
-    if NextTask.Task.Status < tsFinished then
-      ScheduleTask(NextTask)
+    SleepTime := HandleSleepQueue;
+    if FTaskQueue.Count = 0 then
+      // wait at most 50 ms
+      SysUtils.Sleep(Min(SleepTime, 50))
     else
-      FinalizeTask(NextTask);
+    begin
+      NextTask := FTaskQueue.Extract;
+      ExecTask(NextTask);
+      // if task is not finished, reschedule
+      if NextTask.Status < tsFinished then
+      begin
+        // but only if the task is not set to waiting
+        // if its waiting we wait for it to be "woken up"
+        if NextTask.Status <> tsWaiting then
+          NextTask.Reschedule;
+      end
+      else
+        FinalizeTask(NextTask);
+    end;
   end;
   {$IfDef WINDOWS}
   if not ConvertFiberToThread then
@@ -456,206 +752,76 @@ begin
   RemoveExecutor(Self);
 end;
 
-{ TRVTask }
+{$EndRegion TExecutor}
 
-procedure TRVTask.Execute;
+{$Region HelperFunctions}
+
+function GetExecutor: TExecutor;
 begin
-  FResult := Default(T);
+  Result := TExecutor.GetExecutor(TThread.CurrentThread.ThreadID);
 end;
 
-{ TTask }
-
-{$IfDef WINDOWS}
-procedure FiberEntryPoint(lpFiberParameter: Pointer); stdcall;
-begin
-  TTask(lpFiberParameter).DoExecute;
-  // return to scheduler
-  SwitchToFiber(TTask(lpFiberParameter).Executor.FFiber);
-end;
-
-{$Else}
-
-class constructor TTask.InitStatics;
-begin
-  TTask.StackCache := TStackCache.Create;
-  InitCriticalSection(CacheCriticalSection);
-end;
-
-class destructor TTask.CleanupStatics;
+procedure RunAsync(ATask: TTask; FreeTask: Boolean; RaiseErrors: Boolean);
 var
-  st: TStackData;
+  Executor: TExecutor;
 begin
-  for st in TTask.StackCache do
-    Freemem(st.Memory);
-  DoneCriticalSection(CacheCriticalSection);
-  TTask.StackCache.Free;
+  Executor := GetExecutor;
+  if not Assigned(Executor) then
+    raise ENotATaskException.Create('RunAsync can only be called from within a Task');
+  Executor.RunAsync(ATask, FreeTask, RaiseErrors);
 end;
 
-class function TTask.AllocStack(ASize: SizeInt): TStackData;
-begin
-  EnterCriticalSection(CacheCriticalSection);
-  try
-    if (ASize = DefaultTaskStackSize) and (TTask.StackCache.Count > 0) then
-      Result := TTask.StackCache.ExtractIndex(TTask.StackCache.Count - 1)
-    else
-    begin
-      Result.Size := ASize;
-      Result.Memory := GetMem(ASize);
-    end;
-  finally
-    LeaveCriticalSection(CacheCriticalSection);
-  end;
-end;
-
-class procedure TTask.FreeStack(constref AStackData: TStackData);
-begin
-  if not Assigned(AStackData.Memory) then Exit;
-  EnterCriticalSection(CacheCriticalSection);
-  try
-    if AStackData.Size = DefaultTaskStackSize then
-      TTask.StackCache.Add(AStackData)
-    else
-      FreeMem(AStackData.Memory, AStackData.Size);
-  finally
-    LeaveCriticalSection(CacheCriticalSection);
-  end;
-end;
-{$EndIf}
-
-procedure TTask.DoExecute;
-begin
-  // Start the execution
-  FStatus := tsRunning;
-  try
-    Execute;
-    FStatus := tsFinished;
-  except on E: Exception do begin
-    FError := Exception(AcquireExceptionObject);
-    FStatus := tsError;
-  end
-  end;
-end;
-
-constructor TTask.Create(AStackSize: SizeInt);
-begin
-  FTerminated := False;
-  FError := nil;
-  FStatus := tsNone;
-  FExecutor := nil;
-  {$IfDef Windows}
-  FFiber.Fiber:=nil;
-  FFiber.StackSize := AStackSize;
-  {$Else}
-  // We don't allocate the stack now, so if another task before this one finishes
-  // we might be able to reuse it's memory before allocating new one
-  FStack.Size := AStackSize;
-  FStack.Memory := nil;
-  {$EndIf}
-end;
-
-destructor TTask.Destroy;
-begin
-  {$IfDef WINDOWS}
-  if Assigned(FFiber.Fiber) then
-    DeleteFiber(FFiber.Fiber);
-  {$Else}
-  TTask.FreeStack(FStack);
-  {$EndIf}
-  if Assigned(FError) then
-    FError.Free;
-  inherited Destroy;
-end;
-
-procedure TTask.Run(AExecutor: TExecutor);
-{$IfNDef Windows}
+procedure ScheduleForAwait(ATask: TTask);
 var
-  StackPtr, BasePtr, NewStackPtr, NewBasePtr: Pointer;
-  FrameSize: SizeInt;
-{$EndIf}
+  Executor: TExecutor;
 begin
-  FExecutor := AExecutor;
-  {$IfDef WINDOWS}
-  FFiber.Fiber := CreateFiber(FFiber.StackSize, @FiberEntryPoint, Self);
-  if not Assigned(FFiber.Fiber) then
-    raise EFiberError.Create('Cannot create fiber: ' + LastFiberError.ToString);
-  SwitchToFiber(FFiber.Fiber);
-  {$Else}
-  // setup stack
-  if not Assigned(FStack.Memory) then
-    FStack := TTask.AllocStack(FStack.Size);
-  // copy current frame so we can use local variables and arguments
-  {$AsmMode intel}
-  asm
-  MOV StackPtr, RSP
-  MOV BasePtr, RBP
-  end;
-  FrameSize := BasePtr - StackPtr;
-  NewBasePtr := FStack.Memory + FStack.Size;
-  NewStackPtr := NewBasePtr - FrameSize;
-  Move(PByte(StackPtr)^, PByte(NewStackPtr)^, FrameSize);
-  // move to new stack
-  asm
-  MOV RSP, NewStackPtr
-  MOV RBP, NewBasePtr
-  end;
-  DoExecute;
-  longjmp(AExecutor.FSchedulerEnv, 1);
-  {$EndIf}
+  Executor := GetExecutor;
+  if not Assigned(Executor) then
+    raise ENotATaskException.Create('ScheduleForAwait can only be called from within a Task');
+  Executor.ScheduleForAwait(ATask);
 end;
 
-procedure TTask.Resume;
-begin
-  FStatus := tsRunning;
-  {$IfDef WINDOWS}
-  SwitchToFiber(FFiber.Fiber);
-  {$Else}
-  longjmp(FTaskEnv, 1);
-  {$EndIf}
-end;
-
-procedure TTask.Yield;
-begin
-  if FExecutor.FCurrentTask <> Self then
-    raise ETaskNotActiveException.Create('Only an active task can yield');
-  {$IfDef Windows}
-  SwitchToFiber(Executor.FFiber);
-  {$Else}
-  // store current state:
-  if setjmp(FTaskEnv) = 0 then
-    // go to scheduler
-    longjmp(FExecutor.FSchedulerEnv, 1);
-  {$EndIf}
-  // On return, check if we got terminated, if so notify task via exception
-  if Terminated then
-    raise ETaskTerminatedException.Create('Task terminated during waiting');
-end;
-
-procedure TTask.Sleep(Time: QWord);
+procedure Await(ATask: TTask; FreeTask: Boolean);
 var
-  Start: QWord;
+  Executor: TExecutor;
 begin
-  Start := GetTickCount64;
-  repeat
-    Yield;
-  until GetTickCount64 - Start > Time;
+  Executor := GetExecutor;
+  if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
+    raise ENotATaskException.Create('Await can only be called from within a Task');
+  Executor.CurrentTask.Await(ATask, FreeTask);
 end;
 
-procedure TTask.Stop;
+generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
+var
+  Executor: TExecutor;
 begin
-  Terminate;
-  Yield;
+  Executor := GetExecutor;
+  if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
+    raise ENotATaskException.Create('Await can only be called from within a Task');
+  Result := Executor.CurrentTask.specialize Await<TResult>(ATask, FreeTask);
 end;
 
-function TTask.ExtractError: Exception;
+procedure Yield;
+var
+  Executor: TExecutor;
 begin
-  Result := FError;
-  FError := nil;
+  Executor := GetExecutor;
+  if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
+    raise ENotATaskException.Create('Yield can only be called from within a Task');
+  Executor.CurrentTask.Yield;
 end;
 
-procedure TTask.Terminate;
+procedure AsyncSleep(time: QWord);
+var
+  Executor: TExecutor;
 begin
-  FTerminated := True;
+  Executor := GetExecutor;
+  if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
+    raise ENotATaskException.Create('AsyncSleep can only be called from within a Task');
+  Executor.CurrentTask.Sleep(time);
 end;
+
+{$EndRegion HelperFunctions}
 
 end.
 
