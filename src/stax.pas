@@ -1,6 +1,9 @@
 unit stax;
 
 {$mode objfpc}{$H+}
+{$IfDef RELEASE}
+{$define inlining}
+{$EndIf}
 
 interface
 
@@ -94,6 +97,7 @@ type
     procedure DoExecute;
     procedure Schedule(AExecutor: TExecutor; AutoFree: Boolean;
       RaiseExceptions: Boolean);
+    procedure Wait; {$IFDEF inlining}inline;{$ENDIF}
     procedure Reschedule; {$IFDEF inlining}inline;{$ENDIF}
     procedure DependencyResolved(ADependency: TDependable); {$IFDEF inlining}inline;{$ENDIF}
   protected
@@ -141,6 +145,8 @@ type
   { TExecutor }
 
   TExecutor = class
+  private
+  const MaxWaitingTime = 50;
   private type
     TTaskQueue = specialize TQueue<TTask>;
     TSleepQueueEntry = specialize TPair<QWord, TTask>;
@@ -172,6 +178,7 @@ type
     FSchedulerEnv: jmp_buf;
     {$EndIf}
     FThread: TThread;
+    FWaitingTasks: Integer;
 
     procedure RaiseErrorHandler(Task: TTask); {$IFDEF inlining}inline;{$ENDIF}
     procedure ScheduleTask(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
@@ -179,6 +186,13 @@ type
     procedure FinalizeTask(ATask: TTask);
     function HandleSleepQueue: QWord;
     procedure QueueSleep(ATask: TTask; ATime: QWord); {$IFDEF inlining}inline;{$ENDIF}
+    procedure AddWaitingTask(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
+    procedure RemoveWaitingTask(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
+    function TasksWaiting: Boolean; {$IFDEF inlining}inline;{$ENDIF}
+
+    procedure SetupExecution;
+    procedure ExecutionLoop;
+    procedure TeardownExecution;
   public
     constructor Create;
     destructor Destroy; override;
@@ -336,8 +350,17 @@ begin
   AExecutor.ScheduleTask(Self);
 end;
 
+procedure TTask.Wait;
+begin
+  FExecutor.AddWaitingTask(Self);
+  FStatus := tsWaiting;
+  Yield;
+end;
+
 procedure TTask.Reschedule;
 begin
+  if FStatus = tsWaiting then
+    FExecutor.RemoveWaitingTask(Self);
   FStatus := tsRescheduled;
   FExecutor.ScheduleTask(Self);
 end;
@@ -460,8 +483,7 @@ begin
       // add as dependency to that task in order to be notified when it finishes
       ATask.AddDependingTask(Self);
       // then wait until we are woken up
-      FStatus := tsWaiting;
-      Yield;
+      Wait;
     end;
     // Check for errors
     if ATask.Status = tsError then
@@ -487,9 +509,8 @@ procedure TTask.Sleep(Time: QWord);
 begin
   if FExecutor.FCurrentTask <> Self then
     raise ETaskNotActiveException.Create('Only an active task can go to sleep');
-  FStatus := tsWaiting;
   FExecutor.QueueSleep(Self, Time);
-  Yield;
+  Wait;
 end;
 
 procedure TTask.Stop;
@@ -633,16 +654,15 @@ function TExecutor.HandleSleepQueue: QWord;
 var
   CurrTime: QWord;
 begin
+  Result := MaxWaitingTime;
   CurrTime := GetTickCount64;
   while not FSleepQueue.IsEmpty and (FSleepQueue.Top.First < CurrTime) do
   begin
     FSleepQueue.Top.Second.Reschedule;
     FSleepQueue.Pop;
   end;
-  if FSleepQueue.IsEmpty then
-    Result := 0
-  else
-    Result := FSleepQueue.Top.First - CurrTime;
+  if not FSleepQueue.IsEmpty then
+    Result := Min(FSleepQueue.Top.First - CurrTime, MaxWaitingTime);
 end;
 
 procedure TExecutor.QueueSleep(ATask: TTask; ATime: QWord);
@@ -651,6 +671,73 @@ var
 begin
   EndTime := GetTickCount64 + ATime;
   FSleepQueue.Push(specialize Pair<QWord, TTask>(EndTime, ATask));
+end;
+
+procedure TExecutor.AddWaitingTask(ATask: TTask);
+begin
+  // at the moment just count how many are waiting
+  // maybe we need to keep log of the waiting tasks in the future
+  Inc(FWaitingTasks);
+end;
+
+procedure TExecutor.RemoveWaitingTask(ATask: TTask);
+begin
+  Dec(FWaitingTasks);
+end;
+
+function TExecutor.TasksWaiting: Boolean;
+begin
+  Result := FWaitingTasks > 0;
+end;
+
+procedure TExecutor.SetupExecution;
+begin
+  FThread := TThread.CurrentThread;
+  RegisterExecutor(FThread.ThreadID, self);
+  FWaitingTasks:=0;
+  {$IfDef WINDOWS}
+  FFiber := ConvertThreadToFiber(Self);
+  if not Assigned(FFiber) then
+    raise EFiberError.Create('Error calling ConvertThreadToFiber: ' + LastFiberError.ToString);
+  {$EndIf}
+end;
+
+procedure TExecutor.ExecutionLoop;
+var
+  NextTask: TTask;
+  SleepTime: QWord;
+begin
+  while (FTaskQueue.Count > 0) or not FSleepQueue.IsEmpty or TasksWaiting do
+  begin
+    SleepTime := HandleSleepQueue;
+    if FTaskQueue.Count = 0 then
+      // wait at most 50 ms
+      SysUtils.Sleep(SleepTime)
+    else
+    begin
+      NextTask := FTaskQueue.Extract;
+      ExecTask(NextTask);
+      // if task is not finished, reschedule
+      if NextTask.Status < tsFinished then
+      begin
+        // but only if the task is not set to waiting
+        // if its waiting we wait for it to be "woken up"
+        if NextTask.Status <> tsWaiting then
+          NextTask.Reschedule;
+      end
+      else
+        FinalizeTask(NextTask);
+    end;
+  end;
+end;
+
+procedure TExecutor.TeardownExecution;
+begin
+  {$IfDef WINDOWS}
+  if not ConvertFiberToThread then
+    raise EFiberError.Create('Error calling ConvertFiberToThread: ' + LastFiberError.ToString);
+  {$EndIf}
+  RemoveExecutor(Self);
 end;
 
 constructor TExecutor.Create;
@@ -712,44 +799,10 @@ begin
 end;
 
 procedure TExecutor.Run;
-var
-  NextTask: TTask;
-  SleepTime: QWord;
 begin
-  FThread := TThread.CurrentThread;
-  RegisterExecutor(FThread.ThreadID, self);
-  {$IfDef WINDOWS}
-  FFiber := ConvertThreadToFiber(Self);
-  if not Assigned(FFiber) then
-    raise EFiberError.Create('Error calling ConvertThreadToFiber: ' + LastFiberError.ToString);
-  {$EndIf}
-  while (FTaskQueue.Count > 0) or not FSleepQueue.IsEmpty do
-  begin
-    SleepTime := HandleSleepQueue;
-    if FTaskQueue.Count = 0 then
-      // wait at most 50 ms
-      SysUtils.Sleep(Min(SleepTime, 50))
-    else
-    begin
-      NextTask := FTaskQueue.Extract;
-      ExecTask(NextTask);
-      // if task is not finished, reschedule
-      if NextTask.Status < tsFinished then
-      begin
-        // but only if the task is not set to waiting
-        // if its waiting we wait for it to be "woken up"
-        if NextTask.Status <> tsWaiting then
-          NextTask.Reschedule;
-      end
-      else
-        FinalizeTask(NextTask);
-    end;
-  end;
-  {$IfDef WINDOWS}
-  if not ConvertFiberToThread then
-    raise EFiberError.Create('Error calling ConvertFiberToThread: ' + LastFiberError.ToString);
-  {$EndIf}
-  RemoveExecutor(Self);
+  SetupExecution;
+  ExecutionLoop;
+  TeardownExecution;
 end;
 
 {$EndRegion TExecutor}

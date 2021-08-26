@@ -2,6 +2,9 @@ unit stax.helpertypes;
 
 {$mode objfpc}{$H+}
 {$ModeSwitch advancedrecords}
+{$IfDef RELEASE}
+{$define inlining}
+{$EndIf}
 
 interface
 uses
