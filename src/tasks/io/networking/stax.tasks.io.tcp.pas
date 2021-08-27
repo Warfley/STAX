@@ -85,9 +85,22 @@ implementation
 // Helper
 
 procedure WaitForHandshake(ATask: TTask; ASocket: Tsocket); inline;
+var
+  success: LongInt;
+  fs: TFDSet;
+  timeout: TTimeVal;
 begin
-  while not SocketSelectWrite(ASocket) do
-    ATask.Sleep(SocketSleepingTime);
+  FD_ZERO(fs);
+  FD_SET(ASocket, fs);
+  timeout.tv_sec:=0;
+  timeout.tv_usec:=0;
+  repeat
+    success := select(ASocket + 1, Nil, @fs, nil, @timeout);
+    if success = 0 then
+      ATask.Sleep(SocketSleepingTime)
+    else if success < 0 then
+      raise ESocketError.Create('Socket error ' + socketerror.ToString);
+  until success = 1;
 end;
 
 function AsyncAccept(AServerSocket: TSocket): specialize TRVTask<TSocket>;
@@ -150,7 +163,7 @@ end;
 function TCPSocket: TSocket;
 begin
   Result := fpsocket(AF_INET, SOCK_STREAM, 0);
-  if Result = TSocket(INVALID_SOCKET) then
+  if SocketInvalid(Result) then
     raise ESocketError.Create('Error creating socket ' + socketerror.ToString);
 end;
 
@@ -187,7 +200,7 @@ begin
     else if Result < 0 then
     begin
       err := socketerror;
-      if (err = EsockEWOULDBLOCK) or (err = EAGAIN) then
+      if WasBlockingError(err) then
         Result := 0
       else
         raise ESocketError.Create('Socket error ' + err.ToString);
@@ -218,7 +231,7 @@ begin
     else if Result < 0 then
     begin
       err := socketerror;
-      if (err = EsockEWOULDBLOCK) or (err = EAGAIN) then
+      if WasBlockingError(err) then
         Result := 0
       else
         raise ESocketError.Create('Socket error ' + err.ToString);
@@ -250,7 +263,7 @@ begin
     if success <> 0 then
     begin
       err := socketerror;
-      if (err = EsockEWOULDBLOCK) or (err = EAGAIN) then
+      if WasBlockingError(err) then
         WaitForHandshake(self, FSocket)
       else
         raise ESocketError.Create('Socket error ' + err.ToString);
@@ -280,15 +293,15 @@ begin
   try
     repeat
       Conn := fpaccept(FServerSocket, nil, nil);
-      if Conn = Tsocket(INVALID_SOCKET) then
+      if SocketInvalid(Conn) then
       begin
         err := socketerror;
-        if (err = EsockEWOULDBLOCK) or (err = EAGAIN) then
+        if WasBlockingError(err) then
           Sleep(SocketSleepingTime)
         else
           raise ESocketError.Create('Socket error ' + err.ToString);
       end;
-    until Conn <> Tsocket(INVALID_SOCKET);
+    until not SocketInvalid(Conn);
     WaitForHandshake(Self, Conn);
   finally
     RestoreBlocking(FServerSocket, OldState);

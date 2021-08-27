@@ -447,7 +447,7 @@ begin
   MOV RBP, NewBasePtr
   end;
   DoExecute;
-  longjmp(AExecutor.FSchedulerEnv, 1);
+  longjmp(FExecutor.FSchedulerEnv, 1);
   {$EndIf}
 end;
 
