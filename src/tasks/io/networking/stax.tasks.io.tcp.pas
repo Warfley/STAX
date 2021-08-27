@@ -5,10 +5,10 @@ unit stax.tasks.io.tcp;
 interface
 
 uses
-  SysUtils, stax, stax.tasks.io, WinSock2;
+  SysUtils, stax, stax.tasks.io, Sockets, Compatibility.sockets;
 
 type
-  TSocket = WinSock2.TSocket;
+  TSocket = Compatibility.sockets.TSocket;
 
   ESocketError = class(Exception);
   EConnectionClosedException = class(Exception);
@@ -60,6 +60,9 @@ type
   end;
 
 
+const
+  SocketSleepingTime = 10;
+
 function AsyncAccept(AServerSocket: TSocket): specialize TRVTask<TSocket>; inline;
 function AsyncConnect(ASocket: TSocket; const AHost: string; APort: Integer): TTask; inline;
 
@@ -73,28 +76,18 @@ function AsyncSend(ASocket: Tsocket; ABuffer: Pointer; ACount: SizeInt): TTask; 
 generic function AsyncSend<T>(ASocket: Tsocket; AData: T): TTask; overload; inline;
 function AsyncSendLn(ASocket: Tsocket; const AData: String): TTask; inline;
 function AsyncSendStr(ASocket: Tsocket; const AData: String): TTask; inline;
+
+function TCPSocket: TSocket; inline;
+function TCPServerSocket(AHost: String; APort: Integer): TSocket;
+procedure TCPServerListen(AServerSocket: TSocket; Backlog: Integer); inline;
 implementation
-uses Sockets;
 
 // Helper
 
-procedure WaitForHandshake(ATask: TTask; ASocket: Tsocket);
-var
-  success: LongInt;
-  fs: TFDSet;
-  timeout: TTimeVal;
+procedure WaitForHandshake(ATask: TTask; ASocket: Tsocket); inline;
 begin
-  FD_ZERO(fs);
-  FD_SET(ASocket, fs);
-  timeout.tv_sec:=0;
-  timeout.tv_usec:=0;
-  repeat
-    success := select(ASocket + 1, Nil, @fs, nil, @timeout);
-    if success = 0 then
-      ATask.Yield
-    else if success < 0 then
-      raise ESocketError.Create('Socket error ' + WSAGetLastError.ToString);
-  until success = 1;
+  while not SocketSelectWrite(ASocket) do
+    ATask.Sleep(SocketSleepingTime);
 end;
 
 function AsyncAccept(AServerSocket: TSocket): specialize TRVTask<TSocket>;
@@ -154,36 +147,59 @@ begin
   Result := TIOStringWriteTask.Create(TNonBlockingTCPSender.Create(ASocket), AData);
 end;
 
+function TCPSocket: TSocket;
+begin
+  Result := fpsocket(AF_INET, SOCK_STREAM, 0);
+  if Result = TSocket(INVALID_SOCKET) then
+    raise ESocketError.Create('Error creating socket ' + socketerror.ToString);
+end;
+
+function TCPServerSocket(AHost: String; APort: Integer): TSocket;
+var
+  addr: TSockAddr;
+begin
+  Result := TCPSocket;
+  addr.sin_family := AF_INET;
+  addr.sin_port := ShortHostToNet(APort);
+  addr.sin_addr.s_addr := LongWord(StrToNetAddr(AHost));
+  if fpbind(Result, @addr, SizeOf(addr)) <> 0 then raise
+    ESocketError.Create('Error binding to socket to ' + AHost + ':' + APort.ToString + ' ' + socketerror.ToString);
+end;
+
+procedure TCPServerListen(AServerSocket: TSocket; Backlog: Integer);
+begin
+  if fplisten(AServerSocket, Backlog) <> 0 then raise
+    ESocketError.Create('Error starting listening ' + socketerror.ToString);
+end;
+
 { TNonBlockingTCPSender }
 
 function TNonBlockingTCPSender.TryWrite(ABuffer: Pointer; ACount: SizeInt
   ): SizeInt;
 var
-  blocking, err: LongInt;
+  OldState, err: LongInt;
 begin
-  blocking := 1;
-  ioctlsocket(FSocket, FIONBIO, @blocking);
+  OldState := SetNonBlocking(FSocket);
   try
-    Result := send(FSocket, ABuffer, ACount, 0);
+    Result := fpsend(FSocket, ABuffer, ACount, 0);
     if Result = 0 then
       raise EConnectionClosedException.Create('The connection closed')
     else if Result < 0 then
     begin
-      err := WSAGetLastError;
-      if err = WSAEWOULDBLOCK then
+      err := socketerror;
+      if (err = EsockEWOULDBLOCK) or (err = EAGAIN) then
         Result := 0
       else
         raise ESocketError.Create('Socket error ' + err.ToString);
     end;
   finally
-    blocking := 0;
-    ioctlsocket(FSocket, FIONBIO, @blocking);
+    RestoreBlocking(FSocket, OldState);
   end;
 end;
 
 constructor TNonBlockingTCPSender.Create(ASocket: TSocket);
 begin
-  inherited Create;
+  inherited Create(SocketSleepingTime);
   FSocket := ASocket;
 end;
 
@@ -192,31 +208,29 @@ end;
 function TNonBlockingTCPReceiver.TryRead(ABuffer: Pointer; ACount: SizeInt
   ): SizeInt;
 var
-  blocking, err: LongInt;
+  OldState, err: LongInt;
 begin
-  blocking := 1;
-  ioctlsocket(FSocket, FIONBIO, @blocking);
+  OldState := SetNonBlocking(FSocket);
   try
-    Result := recv(FSocket, ABuffer, ACount, 0);
+    Result := fprecv(FSocket, ABuffer, ACount, 0);
     if Result = 0 then
       raise EConnectionClosedException.Create('The connection closed')
     else if Result < 0 then
     begin
-      err := WSAGetLastError;
-      if err = WSAEWOULDBLOCK then
+      err := socketerror;
+      if (err = EsockEWOULDBLOCK) or (err = EAGAIN) then
         Result := 0
       else
         raise ESocketError.Create('Socket error ' + err.ToString);
     end;
   finally
-    blocking := 0;
-    ioctlsocket(FSocket, FIONBIO, @blocking);
+    RestoreBlocking(FSocket, OldState);
   end;
 end;
 
 constructor TNonBlockingTCPReceiver.Create(ASocket: TSocket);
 begin
-  inherited Create;
+  inherited Create(SocketSleepingTime);
   FSocket := ASocket;
 end;
 
@@ -224,11 +238,10 @@ end;
 
 procedure TConnectTask.Execute;
 var
-  blocking, err, success: LongInt;
+  OldState, err, success: LongInt;
   addr: TSockAddr;
 begin
-  blocking := 1;
-  ioctlsocket(FSocket, FIONBIO, @blocking);
+  OldState := SetNonBlocking(FSocket);
   try
     addr.sin_family := AF_INET;
     addr.sin_port := ShortHostToNet(FPort);
@@ -236,15 +249,14 @@ begin
     success := fpconnect(FSocket, @addr, SizeOf(addr));
     if success <> 0 then
     begin
-      err := WSAGetLastError;
-      if err = WSAEWOULDBLOCK then
+      err := socketerror;
+      if (err = EsockEWOULDBLOCK) or (err = EAGAIN) then
         WaitForHandshake(self, FSocket)
       else
         raise ESocketError.Create('Socket error ' + err.ToString);
     end;
   finally
-    blocking := 0;
-    ioctlsocket(FSocket, FIONBIO, @blocking);
+    RestoreBlocking(FSocket, OldState);
   end;
 end;
 
@@ -261,27 +273,25 @@ end;
 
 procedure TAcceptTask.Execute;
 var
-  blocking, err: LongInt;
+  OldState, blocking, err: LongInt;
   Conn: TSocket;
 begin
-  blocking := 1;
-  ioctlsocket(FServerSocket, FIONBIO, @blocking);
+  OldState := SetNonBlocking(FServerSocket);
   try
     repeat
-      Conn := WinSock2.accept(FServerSocket, nil, nil);
-      if Conn = INVALID_SOCKET then
+      Conn := fpaccept(FServerSocket, nil, nil);
+      if Conn = Tsocket(INVALID_SOCKET) then
       begin
-        err := WSAGetLastError;
-        if err = WSAEWOULDBLOCK then
-          Yield
+        err := socketerror;
+        if (err = EsockEWOULDBLOCK) or (err = EAGAIN) then
+          Sleep(SocketSleepingTime)
         else
           raise ESocketError.Create('Socket error ' + err.ToString);
       end;
-    until Conn <> INVALID_SOCKET;
+    until Conn <> Tsocket(INVALID_SOCKET);
     WaitForHandshake(Self, Conn);
   finally
-    blocking := 0;
-    ioctlsocket(FServerSocket, FIONBIO, @blocking);
+    RestoreBlocking(FServerSocket, OldState);
   end;
   FResult := Conn;
 end;

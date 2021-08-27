@@ -3,7 +3,7 @@ program client;
 {$mode objfpc}{$H+}
 
 uses
-  Sockets, stax, stax.tasks.functional, stax.tasks.io.tcp, stax.tasks.io.console;
+  stax, stax.tasks.functional, stax.tasks.io.tcp, stax.tasks.io.console;
 
 procedure SendUserInput(AExecutor: TExecutor; ASocket: Tsocket);
 var
@@ -32,7 +32,7 @@ procedure ConnectToServer(AExecutor: TExecutor; AHost: string; APort: Integer);
 var
   Sock: Tsocket;
 begin
-  Sock := fpsocket(AF_INET, SOCK_STREAM, 0);
+  Sock := TCPSocket;
   Await(AsyncConnect(Sock, AHost, APort));
   AExecutor.RunAsync(specialize AsyncProcedure<TSocket>(@SendUserInput, Sock));
   AExecutor.RunAsync(specialize AsyncProcedure<TSocket>(@HandleReceive, Sock));

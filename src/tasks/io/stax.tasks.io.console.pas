@@ -21,6 +21,9 @@ type
     constructor Create(ADirectRead: Boolean = False);
   end;
 
+const
+  ConsoleSleepTime = 50;
+
 function AsyncConsoleRead(DirectRead: Boolean = False): specialize TRVTask<Char>; overload;
 function AsyncConsoleRead(Count: SizeInt; DirectRead: Boolean = False): specialize TRVTask<String>; overload;
 function AsyncConsoleReadLn(DirectRead: Boolean = False): specialize TRVTask<String>; overload;
@@ -92,6 +95,7 @@ end;
 
 constructor TConsoleReader.Create(ADirectRead: Boolean);
 begin
+  inherited Create(ConsoleSleepTime);
   FDirectRead:=ADirectRead;
   FHandle := StdInputHandle;
 end;

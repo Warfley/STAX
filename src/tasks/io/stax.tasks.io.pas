@@ -15,17 +15,25 @@ type
   { TIOReader }
 
   TIOReader = class
+  private
+    FAsyncSleepTime: Integer;
   public
-  function TryRead(ABuffer: Pointer; ACount: SizeInt): SizeInt; virtual; abstract;
-  procedure AsyncRead(AExecutor: TExecutor; ABuffer: Pointer; ACount: SizeInt);
+    constructor Create(AsyncSleepTime: Integer);
+
+    function TryRead(ABuffer: Pointer; ACount: SizeInt): SizeInt; virtual; abstract;
+    procedure AsyncRead(AExecutor: TExecutor; ABuffer: Pointer; ACount: SizeInt);
   end;
 
   { TIOWriter }
 
   TIOWriter = class
+  private
+    FAsyncSleepTime: Integer;
   public
-  function TryWrite(ABuffer: Pointer; ACount: SizeInt): SizeInt; virtual; abstract;
-  procedure AsyncWrite(AExecutor: TExecutor; ABuffer: Pointer; ACount: SizeInt);
+    constructor Create(AsyncSleepTime: Integer);
+
+    function TryWrite(ABuffer: Pointer; ACount: SizeInt): SizeInt; virtual; abstract;
+    procedure AsyncWrite(AExecutor: TExecutor; ABuffer: Pointer; ACount: SizeInt);
   end;
 
   { TIOReadTask }
@@ -201,6 +209,11 @@ begin
   inherited Destroy;
 end;
 
+constructor TIOReader.Create(AsyncSleepTime: Integer);
+begin
+  FAsyncSleepTime := AsyncSleepTime;
+end;
+
 procedure TIOReader.AsyncRead(AExecutor: TExecutor; ABuffer: Pointer;
   ACount: SizeInt);
 var
@@ -211,8 +224,13 @@ begin
   begin
     BytesRead += TryRead(@PByte(ABuffer)[BytesRead], ACount - BytesRead);
     if BytesRead < ACount then
-      AExecutor.Yield;
+      AExecutor.Sleep(FAsyncSleepTime);
   end;
+end;
+
+constructor TIOWriter.Create(AsyncSleepTime: Integer);
+begin
+  FAsyncSleepTime := AsyncSleepTime;
 end;
 
 procedure TIOWriter.AsyncWrite(AExecutor: TExecutor; ABuffer: Pointer;
@@ -225,7 +243,7 @@ begin
   begin
     BytesWritten += TryWrite(@PByte(ABuffer)[BytesWritten], ACount - BytesWritten);
     if BytesWritten < ACount then
-      AExecutor.Yield;
+      AExecutor.Sleep(FAsyncSleepTime);
   end;
 end;
 

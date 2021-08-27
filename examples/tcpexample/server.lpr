@@ -3,7 +3,7 @@ program server;
 {$mode objfpc}{$H+}
 
 uses
-  Sockets, stax, stax.tasks.io.tcp, stax.tasks.functional;
+  stax, stax.tasks.io.tcp, stax.tasks.functional;
 
 // simple tcp echo server
 procedure HandleConnection(AExecutor: TExecutor; AConnection: TSocket);
@@ -21,17 +21,10 @@ end;
 procedure RunServer(AExecutor: TExecutor; AHost: string; APort: Integer);
 var
   Sock: Tsocket;
-  addr: TSockAddr;
   Conn: TSocket;
 begin
-  Sock := fpsocket(AF_INET, SOCK_STREAM, 0);
-  addr.sin_family := AF_INET;
-  addr.sin_port := ShortHostToNet(APort);
-  addr.sin_addr.s_addr := LongWord(StrToNetAddr(AHost));
-  if fpbind(Sock, @addr, SizeOf(addr)) <> 0 then raise
-    ESocketError.Create('Error binding to socket');
-  if fplisten(Sock, 10) <> 0 then raise
-    ESocketError.Create('Error binding to socket');
+  Sock := TCPServerSocket(AHost, APort);
+  TCPServerListen(Sock, 10);
   while True do
   begin
     Conn := specialize Await<TSocket>(AsyncAccept(Sock));
