@@ -18,10 +18,12 @@ type
 
   // Exceptions
   ETaskTerminatedException = class(Exception);
+  ETaskAlreadyTerminatedException = class(Exception);
   ETaskNotActiveException = class(Exception);
   EForeignTaskException = class(Exception);
   ETaskAlreadyScheduledException = class(Exception);
   ENotATaskException = class(Exception);
+  ESomethingWentHorriblyWrongException = class(Exception);
 
   { EUnhandledError }
 
@@ -115,7 +117,6 @@ type
     //procedure Await(ATask: TTask; FreeTask: Boolean = True); overload;
     //generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload;
     procedure Sleep(Time: QWord);
-    procedure Stop; {$IFDEF inlining}inline;{$ENDIF}
 
     function ExtractError: Exception; {$IFDEF inlining}inline;{$ENDIF}
 
@@ -179,6 +180,7 @@ type
     {$EndIf}
     FThread: TThread;
     FWaitingTasks: Integer;
+    FTerminated: Boolean;
 
     procedure RaiseErrorHandler(Task: TTask); {$IFDEF inlining}inline;{$ENDIF}
     procedure ScheduleTask(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
@@ -193,6 +195,9 @@ type
     procedure SetupExecution;
     procedure ExecutionLoop;
     procedure TeardownExecution;
+
+    procedure TerminateTaskAndFinish(ATask: TTask); {$IfDef inlining}inline;{$endif}
+    procedure StopRemainingTasks;
   public
     constructor Create;
     destructor Destroy; override;
@@ -206,10 +211,12 @@ type
     procedure Sleep(time: QWord); {$IFDEF inlining}inline;{$ENDIF}
 
     procedure Run;
+    procedure Terminate; inline;
 
     property OnError: TErrorHandler read FErrorHandler write FErrorHandler;
     property Thread: TThread read FThread;
     property CurrentTask: TTask read FCurrentTask;
+    property Terminated: Boolean read FTerminated;
   end;
 
   { TExecutorHelper }
@@ -418,6 +425,9 @@ begin
     raise EFiberError.Create('Cannot create fiber: ' + LastFiberError.ToString);
   SwitchToFiber(FFiber.Fiber);
   {$Else}
+  // Store current environment
+  if setjmp(FExecutor.FSchedulerEnv) <> 0 then
+    Exit; // simply return if we jump back
   // setup stack
   if not Assigned(FStack.Memory) then
     FStack := TTask.AllocStack(FStack.Size);
@@ -447,7 +457,8 @@ begin
   {$IfDef WINDOWS}
   SwitchToFiber(FFiber.Fiber);
   {$Else}
-  longjmp(FTaskEnv, 1);
+  if setjmp(FExecutor.FSchedulerEnv) = 0 then
+    longjmp(FTaskEnv, 1);
   {$EndIf}
 end;
 
@@ -455,6 +466,8 @@ procedure TTask.Yield;
 begin
   if FExecutor.FCurrentTask <> Self then
     raise ETaskNotActiveException.Create('Only an active task can yield');
+  if FTerminated then
+    raise  ETaskAlreadyTerminatedException.Create('Can''t yield in an already terminated task. Just finish up!');
   {$IfDef Windows}
   SwitchToFiber(Executor.FFiber);
   {$Else}
@@ -471,6 +484,8 @@ end;
 procedure TTaskHelper.Await(ATask: TTask; FreeTask: Boolean);
 begin
   try
+    if FTerminated then
+      raise  ETaskAlreadyTerminatedException.Create('Can''t await in an already terminated task. Just finish up!');
     // schedule task to await
     if ATask.Status = tsNone then
       ScheduleForAwait(ATask)
@@ -497,6 +512,8 @@ end;
 generic function TTaskHelper.Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
 begin
   try
+    if FTerminated then
+      raise  ETaskAlreadyTerminatedException.Create('Can''t await in an already terminated task. Just finish up!');
     Self.Await(ATask, False);
     Result := ATask.TaskResult;
   finally
@@ -509,14 +526,10 @@ procedure TTask.Sleep(Time: QWord);
 begin
   if FExecutor.FCurrentTask <> Self then
     raise ETaskNotActiveException.Create('Only an active task can go to sleep');
+  if FTerminated then
+    raise ETaskAlreadyTerminatedException.Create('Can''t sleep in an already terminated task. Just finish up!');
   FExecutor.QueueSleep(Self, Time);
   Wait;
-end;
-
-procedure TTask.Stop;
-begin
-  Terminate;
-  Yield;
 end;
 
 function TTask.ExtractError: Exception;
@@ -622,14 +635,6 @@ end;
 
 procedure TExecutor.ExecTask(ATask: TTask);
 begin
-  {$IfNDef Windows}
-  if setjmp(FSchedulerEnv) <> 0 then
-  begin
-    // when the scheduler is called we end up here
-    FCurrentTask := nil;
-    Exit;
-  end;
-  {$EndIf}
   FCurrentTask := ATask;
   if ATask.Status = tsRescheduled then
     ATask.Resume
@@ -695,6 +700,7 @@ begin
   FThread := TThread.CurrentThread;
   RegisterExecutor(FThread.ThreadID, self);
   FWaitingTasks:=0;
+  FTerminated := False;
   {$IfDef WINDOWS}
   FFiber := ConvertThreadToFiber(Self);
   if not Assigned(FFiber) then
@@ -707,7 +713,7 @@ var
   NextTask: TTask;
   SleepTime: QWord;
 begin
-  while (FTaskQueue.Count > 0) or not FSleepQueue.IsEmpty or TasksWaiting do
+  while not FTerminated and ((FTaskQueue.Count > 0) or not FSleepQueue.IsEmpty or TasksWaiting) do
   begin
     SleepTime := HandleSleepQueue;
     if FTaskQueue.Count = 0 then
@@ -733,11 +739,59 @@ end;
 
 procedure TExecutor.TeardownExecution;
 begin
+  StopRemainingTasks;
+  if TasksWaiting then
+    raise ESomethingWentHorriblyWrongException.Create('Stopped execution while some tasks still waiting... This should never happen');
   {$IfDef WINDOWS}
   if not ConvertFiberToThread then
     raise EFiberError.Create('Error calling ConvertFiberToThread: ' + LastFiberError.ToString);
   {$EndIf}
   RemoveExecutor(Self);
+end;
+
+procedure TExecutor.TerminateTaskAndFinish(ATask: TTask);
+begin
+  // Only call this on tasks waiting or scheduled
+  ATask.Terminate;
+  ATask.Resume;
+end;
+
+procedure TExecutor.StopRemainingTasks;
+var
+  ATask, Dependency: TTask;
+begin
+  // wakeup all sleeping tasks
+  while not FSleepQueue.IsEmpty do
+  begin
+    FSleepQueue.Top.Second.Reschedule;
+    FSleepQueue.Pop;
+  end;
+  // stop all scheduled tasks
+  while FTaskQueue.Count > 0 do
+  begin
+    ATask := FTaskQueue.Extract;
+    if ATask.FStatus = tsScheduled then
+    begin
+      // not started yet, simply kill it off:
+      // first set the error
+      ATask.FError := ETaskTerminatedException.Create('Task terminated by executor');
+      ATask.FStatus := tsError;
+      // but also notify all waiting tasks
+      ATask.ResolveDependencies;
+      // then Free
+      if ATask.FAutoFree then
+        ATask.Free;
+    end
+    else if ATask.FStatus = tsRescheduled then
+    begin
+      // task is yielded, set the terminated flag and continue to let it raise an exception
+      TerminateTaskAndFinish(ATask);
+      if ATask.FAutoFree then
+        ATask.Free;
+    end
+    else
+      raise ESomethingWentHorriblyWrongException.Create('Only scheduled and rescheduled tasks should be in queue');
+  end;
 end;
 
 constructor TExecutor.Create;
@@ -803,6 +857,11 @@ begin
   SetupExecution;
   ExecutionLoop;
   TeardownExecution;
+end;
+
+procedure TExecutor.Terminate;
+begin
+  FTerminated := True;
 end;
 
 {$EndRegion TExecutor}
