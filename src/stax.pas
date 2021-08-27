@@ -5,6 +5,10 @@ unit stax;
 {$define inlining}
 {$EndIf}
 
+{$IfDef UNIX}
+{$Error STAX does currently only work on Windows}
+{$EndIf}
+
 interface
 
 uses
