@@ -5,15 +5,11 @@ unit stax;
 {$define inlining}
 {$EndIf}
 
-{$IfDef UNIX}
-{$Error STAX does currently only work on Windows}
-{$EndIf}
-
 interface
 
 uses
-  Classes, SysUtils, math, gpriorityqueue, Generics.Collections, stax.helpertypes
-  {$IfDef WINDOWS}, windows.fiber{$EndIf};
+  Classes, SysUtils, math, gpriorityqueue, Generics.Collections, stax.helpertypes,
+  fibers;
 
 type
   // Forward definitions
@@ -67,26 +63,6 @@ type
   TTask = class(TDependable)
   // Maybe this is too much?
   public const DefaultTaskStackSize = DefaultStackSize;
-  private type
-  {$IfDef Windows}
-    TFiberData = record
-      Fiber: TFiber;
-      StackSize: SizeInt;
-    end;
-  {$Else}
-    TStackData = record
-      Size: SizeInt;
-      Memory: Pointer;
-    end;
-    TStackCache = specialize TList<TStackData>;
-  private
-    class var StackCache: TStackCache;
-    class var CacheCriticalSection: TRTLCriticalSection;
-    class constructor InitStatics;
-    class destructor CleanupStatics;
-    class function AllocStack(ASize: SizeInt): TStackData; static; {$IFDEF inlining}inline;{$ENDIF}
-    class procedure FreeStack(constref AStackData: TStackData); static; {$IFDEF inlining}inline;{$ENDIF}
-  {$EndIf}
   private
     FAutoFree: Boolean;
     FRaiseExceptions: Boolean;
@@ -94,12 +70,7 @@ type
     FStatus: TTaskStatus;
     FExecutor: TExecutor;
     FTerminated: Boolean;
-    {$IfDef Windows}
-    FFiber: TFiberData;
-    {$Else}
-    FStack: TStackData;
-    FTaskEnv: jmp_buf;
-    {$EndIf}
+    FFiber: TFiber;
     procedure DoExecute;
     procedure Schedule(AExecutor: TExecutor; AutoFree: Boolean;
       RaiseExceptions: Boolean);
@@ -114,7 +85,6 @@ type
 
     procedure Terminate; {$IFDEF inlining}inline;{$ENDIF}
 
-    procedure Run;
     procedure Resume;
     procedure Yield;
     // because forward declarations of generics make fpc crash, this is put in a helper
@@ -177,11 +147,7 @@ type
     FTaskQueue: TTaskQueue;
     FSleepQueue: TSleepQueue;
     FCurrentTask: TTask;
-    {$IfDef Windows}
     FFiber: TFiber;
-    {$Else}
-    FSchedulerEnv: jmp_buf;
-    {$EndIf}
     FThread: TThread;
     FWaitingTasks: Integer;
     FTerminated: Boolean;
@@ -231,6 +197,18 @@ type
     generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload; {$IFDEF inlining}inline;{$ENDIF}
   end;
 
+  { TTaskWorkerFiber }
+
+  TTaskWorkerFiber = class(TExecutableFiber)
+  private
+    FTask: TTask;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(StackSize: SizeInt; ATask: TTask);
+    destructor Destroy; override;
+  end;
+
 
 function GetExecutor: TExecutor; {$IFDEF inlining}inline;{$ENDIF}
 procedure RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True); {$IFDEF inlining}inline;{$ENDIF}
@@ -241,6 +219,24 @@ procedure Yield; {$IFDEF inlining}inline;{$ENDIF}
 procedure AsyncSleep(time: QWord); {$IFDEF inlining}inline;{$ENDIF}
 
 implementation
+
+{ TTaskWorkerFiber }
+
+procedure TTaskWorkerFiber.Execute;
+begin
+  FTask.DoExecute;
+end;
+
+constructor TTaskWorkerFiber.Create(StackSize: SizeInt; ATask: TTask);
+begin
+  inherited Create(StackSize);
+  FTask := ATask;
+end;
+
+destructor TTaskWorkerFiber.Destroy;
+begin
+  inherited Destroy;
+end;
 
 {$Region TDependable}
 
@@ -275,63 +271,6 @@ end;
 {$Region TTask}
 
 { TTask }
-
-{$IfDef WINDOWS}
-procedure FiberEntryPoint(lpFiberParameter: Pointer); stdcall;
-begin
-  TTask(lpFiberParameter).DoExecute;
-  // return to scheduler
-  SwitchToFiber(TTask(lpFiberParameter).Executor.FFiber);
-end;
-
-{$Else}
-
-class constructor TTask.InitStatics;
-begin
-  TTask.StackCache := TStackCache.Create;
-  InitCriticalSection(CacheCriticalSection);
-end;
-
-class destructor TTask.CleanupStatics;
-var
-  st: TStackData;
-begin
-  for st in TTask.StackCache do
-    Freemem(st.Memory);
-  DoneCriticalSection(CacheCriticalSection);
-  TTask.StackCache.Free;
-end;
-
-class function TTask.AllocStack(ASize: SizeInt): TStackData;
-begin
-  EnterCriticalSection(CacheCriticalSection);
-  try
-    if (ASize = DefaultTaskStackSize) and (TTask.StackCache.Count > 0) then
-      Result := TTask.StackCache.ExtractIndex(TTask.StackCache.Count - 1)
-    else
-    begin
-      Result.Size := ASize;
-      Result.Memory := GetMem(ASize);
-    end;
-  finally
-    LeaveCriticalSection(CacheCriticalSection);
-  end;
-end;
-
-class procedure TTask.FreeStack(constref AStackData: TStackData);
-begin
-  if not Assigned(AStackData.Memory) then Exit;
-  EnterCriticalSection(CacheCriticalSection);
-  try
-    if AStackData.Size = DefaultTaskStackSize then
-      TTask.StackCache.Add(AStackData)
-    else
-      FreeMem(AStackData.Memory, AStackData.Size);
-  finally
-    LeaveCriticalSection(CacheCriticalSection);
-  end;
-end;
-{$EndIf}
 
 procedure TTask.DoExecute;
 begin
@@ -392,78 +331,21 @@ begin
   FError := nil;
   FStatus := tsNone;
   FExecutor := nil;
-  {$IfDef Windows}
-  FFiber.Fiber:=nil;
-  FFiber.StackSize := AStackSize;
-  {$Else}
-  // We don't allocate the stack now, so if another task before this one finishes
-  // we might be able to reuse it's memory before allocating new one
-  FStack.Size := AStackSize;
-  FStack.Memory := nil;
-  {$EndIf}
+  FFiber := TTaskWorkerFiber.Create(AStackSize, Self);
 end;
 
 destructor TTask.Destroy;
 begin
-  {$IfDef WINDOWS}
-  if Assigned(FFiber.Fiber) then
-    DeleteFiber(FFiber.Fiber);
-  {$Else}
-  TTask.FreeStack(FStack);
-  {$EndIf}
+  FFiber.Free;
   if Assigned(FError) then
     FError.Free;
   inherited Destroy;
 end;
 
-procedure TTask.Run;
-{$IfNDef Windows}
-var
-  StackPtr, BasePtr, NewStackPtr, NewBasePtr: Pointer;
-  FrameSize: SizeInt;
-{$EndIf}
-begin
-  {$IfDef WINDOWS}
-  FFiber.Fiber := CreateFiber(FFiber.StackSize, @FiberEntryPoint, Self);
-  if not Assigned(FFiber.Fiber) then
-    raise EFiberError.Create('Cannot create fiber: ' + LastFiberError.ToString);
-  SwitchToFiber(FFiber.Fiber);
-  {$Else}
-  // Store current environment
-  if setjmp(FExecutor.FSchedulerEnv) <> 0 then
-    Exit; // simply return if we jump back
-  // setup stack
-  if not Assigned(FStack.Memory) then
-    FStack := TTask.AllocStack(FStack.Size);
-  // copy current frame so we can use local variables and arguments
-  {$AsmMode intel}
-  asm
-  MOV StackPtr, RSP
-  MOV BasePtr, RBP
-  end;
-  FrameSize := BasePtr - StackPtr;
-  NewBasePtr := FStack.Memory + FStack.Size;
-  NewStackPtr := NewBasePtr - FrameSize;
-  Move(PByte(StackPtr)^, PByte(NewStackPtr)^, FrameSize);
-  // move to new stack
-  asm
-  MOV RSP, NewStackPtr
-  MOV RBP, NewBasePtr
-  end;
-  DoExecute;
-  longjmp(FExecutor.FSchedulerEnv, 1);
-  {$EndIf}
-end;
-
 procedure TTask.Resume;
 begin
   FStatus := tsRunning;
-  {$IfDef WINDOWS}
-  SwitchToFiber(FFiber.Fiber);
-  {$Else}
-  if setjmp(FExecutor.FSchedulerEnv) = 0 then
-    longjmp(FTaskEnv, 1);
-  {$EndIf}
+  FExecutor.FFiber.SwitchTo(FFiber);
 end;
 
 procedure TTask.Yield;
@@ -472,14 +354,7 @@ begin
     raise ETaskNotActiveException.Create('Only an active task can yield');
   if FTerminated then
     raise  ETaskAlreadyTerminatedException.Create('Can''t yield in an already terminated task. Just finish up!');
-  {$IfDef Windows}
-  SwitchToFiber(Executor.FFiber);
-  {$Else}
-  // store current state:
-  if setjmp(FTaskEnv) = 0 then
-    // go to scheduler
-    longjmp(FExecutor.FSchedulerEnv, 1);
-  {$EndIf}
+  FFiber.Return;
   // On return, check if we got terminated, if so notify task via exception
   if Terminated then
     raise ETaskTerminatedException.Create('Task terminated during waiting');
@@ -640,10 +515,7 @@ end;
 procedure TExecutor.ExecTask(ATask: TTask);
 begin
   FCurrentTask := ATask;
-  if ATask.Status = tsRescheduled then
-    ATask.Resume
-  else
-    ATask.Run;
+  ATask.Resume;
   FCurrentTask := nil;
 end;
 
@@ -705,11 +577,7 @@ begin
   RegisterExecutor(FThread.ThreadID, self);
   FWaitingTasks:=0;
   FTerminated := False;
-  {$IfDef WINDOWS}
-  FFiber := ConvertThreadToFiber(Self);
-  if not Assigned(FFiber) then
-    raise EFiberError.Create('Error calling ConvertThreadToFiber: ' + LastFiberError.ToString);
-  {$EndIf}
+  FFiber := TMainFiber.Create;
 end;
 
 procedure TExecutor.ExecutionLoop;
@@ -746,10 +614,7 @@ begin
   StopRemainingTasks;
   if TasksWaiting then
     raise ESomethingWentHorriblyWrongException.Create('Stopped execution while some tasks still waiting... This should never happen');
-  {$IfDef WINDOWS}
-  if not ConvertFiberToThread then
-    raise EFiberError.Create('Error calling ConvertFiberToThread: ' + LastFiberError.ToString);
-  {$EndIf}
+  FreeAndNil(FFiber);
   RemoveExecutor(Self);
 end;
 

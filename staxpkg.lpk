@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CONFIG>
-  <Package Version="4">
+  <Package Version="5">
     <PathDelim Value="\"/>
     <Name Value="StaxPKG"/>
     <Type Value="RunAndDesignTime"/>
@@ -8,7 +8,7 @@
       <Version Value="11"/>
       <PathDelim Value="\"/>
       <SearchPaths>
-        <OtherUnitFiles Value="src;src\tasks\functional;src\tasks\io;src\tasks\io\networking;src\compatibility"/>
+        <OtherUnitFiles Value="src;src\tasks\functional;src\tasks\io;src\tasks\io\networking;src\compatibility;external\FPCFiber"/>
         <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
       </SearchPaths>
     </CompilerOptions>
@@ -54,6 +54,7 @@
         <UnitName Value="Compatibility.Console"/>
       </Item10>
     </Files>
+    <CompatibilityMode Value="True"/>
     <RequiredPkgs Count="1">
       <Item1>
         <PackageName Value="FCL"/>

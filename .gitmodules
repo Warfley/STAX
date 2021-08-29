@@ -1,0 +1,3 @@
+[submodule "external/FPCFiber"]
+	path = external/FPCFiber
+	url = git@github.com:Warfley/FPCFiber.git
