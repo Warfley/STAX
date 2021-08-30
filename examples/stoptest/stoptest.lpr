@@ -3,7 +3,7 @@ program stoptest;
 {$mode objfpc}{$H+}
 
 uses
-  stax, stax.tasks.functional;
+  stax, stax.functional;
 
 procedure SleepingFunc(AExecutor: TExecutor);
 begin

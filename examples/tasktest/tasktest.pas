@@ -3,7 +3,7 @@ program tasktest;
 {$mode objfpc}{$H+}
 
 uses
-  SysUtils, Stax, Stax.tasks.functional;
+  SysUtils, Stax, Stax.functional;
 
 procedure AsyncWrite(AExecutor: TExecutor; ALine: String);
 begin

@@ -18,12 +18,14 @@ type
 
   // Exceptions
   ETaskTerminatedException = class(Exception);
+  EAwaitedTaskTerminatedException = class(Exception);
   ETaskAlreadyTerminatedException = class(Exception);
   ETaskNotActiveException = class(Exception);
   EForeignTaskException = class(Exception);
   ETaskAlreadyScheduledException = class(Exception);
   ENotATaskException = class(Exception);
   ESomethingWentHorriblyWrongException = class(Exception);
+  EAlreadyOneExecutorActiveException = class(Exception);
 
   { EUnhandledError }
 
@@ -61,8 +63,8 @@ type
   { TTask }
 
   TTask = class(TDependable)
-  // Maybe this is too much?
-  public const DefaultTaskStackSize = DefaultStackSize;
+  // 4kb is the default page size. Maybe this is too little?
+  public const DefaultTaskStackSize = 4 * 1024;
   private
     FAutoFree: Boolean;
     FRaiseExceptions: Boolean;
@@ -131,23 +133,12 @@ type
       public class function c(constref A, B: TSleepQueueEntry): Boolean; static; inline;
     end;
     TSleepQueue = specialize TPriorityQueue<TSleepQueueEntry, TSleepQueueComparator>;
-    TThreadExecutorMap = specialize TDictionary<TThreadID, TExecutor>;
-  private
-    class var ThreadExecutorMap: TThreadExecutorMap;
-    class var ExecutorMapCriticalSection: TRTLCriticalSection;
-    class constructor InitStatics;
-    class destructor CleanupStatics;
-    class procedure RegisterExecutor(ThreadID: TThreadID; Executor: TExecutor); static; {$IFDEF inlining}inline;{$ENDIF}
-    class procedure RemoveExecutor(Executor: TExecutor); static; {$IFDEF inlining}inline;{$ENDIF}
-  public
-    class function GetExecutor(ThreadID: Integer): TExecutor; static; {$IFDEF inlining}inline;{$ENDIF}
   private
     FErrorHandler: TErrorHandler;
     FTaskQueue: TTaskQueue;
     FSleepQueue: TSleepQueue;
     FCurrentTask: TTask;
     FFiber: TFiber;
-    FThread: TThread;
     FWaitingTasks: Integer;
     FTerminated: Boolean;
 
@@ -183,7 +174,6 @@ type
     procedure Terminate; inline;
 
     property OnError: TErrorHandler read FErrorHandler write FErrorHandler;
-    property Thread: TThread read FThread;
     property CurrentTask: TTask read FCurrentTask;
     property Terminated: Boolean read FTerminated;
   end;
@@ -210,6 +200,7 @@ type
 
 
 function GetExecutor: TExecutor; {$IFDEF inlining}inline;{$ENDIF}
+function GetCurrentTask: TTask; {$IFDEF inlining}inline;{$ENDIF}
 procedure RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True); {$IFDEF inlining}inline;{$ENDIF}
 function ScheduleForAwait(ATask: TTask): TTask; {$IFDEF inlining}inline;{$ENDIF}
 procedure Await(ATask: TTask; FreeTask: Boolean = True); overload; {$IFDEF inlining}inline;{$ENDIF}
@@ -218,6 +209,9 @@ procedure Yield; {$IFDEF inlining}inline;{$ENDIF}
 procedure AsyncSleep(time: QWord); {$IFDEF inlining}inline;{$ENDIF}
 
 implementation
+
+// global variables
+threadvar CurrentExecutor: TExecutor;
 
 { TTaskWorkerFiber }
 
@@ -360,6 +354,8 @@ begin
 end;
 
 procedure TTaskHelper.Await(ATask: TTask; FreeTask: Boolean);
+var
+  Err: Exception;
 begin
   try
     if FTerminated then
@@ -380,7 +376,16 @@ begin
     end;
     // Check for errors
     if ATask.Status = tsError then
-      raise ATask.ExtractError;
+    begin
+      Err := ATask.ExtractError;
+      if Err is ETaskTerminatedException then
+      begin
+        Err.Free;
+        raise EAwaitedTaskTerminatedException.Create('Awaited task got terminated before finishing');
+      end
+      else
+        raise err;
+    end;
   finally
     if FreeTask then
       ATask.Free;
@@ -391,7 +396,7 @@ generic function TTaskHelper.Await<TResult>(ATask: specialize TRVTask<TResult>; 
 begin
   try
     if FTerminated then
-      raise  ETaskAlreadyTerminatedException.Create('Can''t await in an already terminated task. Just finish up!');
+      raise ETaskAlreadyTerminatedException.Create('Can''t await in an already terminated task. Just finish up!');
     Self.Await(ATask, False);
     Result := ATask.TaskResult;
   finally
@@ -456,45 +461,6 @@ begin
 end;
 
 { TExecutor }
-
-class constructor TExecutor.InitStatics;
-begin
-  ThreadExecutorMap := TThreadExecutorMap.Create;
-  InitCriticalSection(ExecutorMapCriticalSection);
-end;
-
-class destructor TExecutor.CleanupStatics;
-begin
-  DoneCriticalSection(ExecutorMapCriticalSection);
-  ThreadExecutorMap.Free;
-end;
-
-class procedure TExecutor.RegisterExecutor(ThreadID: TThreadID;
-  Executor: TExecutor);
-begin
-  EnterCriticalSection(ExecutorMapCriticalSection);
-  try
-    ThreadExecutorMap.Add(ThreadID, Executor);
-  finally
-    LeaveCriticalSection(ExecutorMapCriticalSection);
-  end;
-end;
-
-class procedure TExecutor.RemoveExecutor(Executor: TExecutor);
-begin
-  EnterCriticalSection(ExecutorMapCriticalSection);
-  try
-    ThreadExecutorMap.Remove(Executor.Thread.ThreadID);
-  finally
-    LeaveCriticalSection(ExecutorMapCriticalSection);
-  end;
-end;
-
-class function TExecutor.GetExecutor(ThreadID: Integer): TExecutor;
-begin
-  if not ThreadExecutorMap.TryGetValue(ThreadID, Result) then
-    Result := nil;
-end;
 
 procedure TExecutor.RaiseErrorHandler(Task: TTask);
 var
@@ -576,8 +542,9 @@ end;
 
 procedure TExecutor.SetupExecution;
 begin
-  FThread := TThread.CurrentThread;
-  RegisterExecutor(FThread.ThreadID, self);
+  if Assigned(CurrentExecutor) then
+    raise EAlreadyOneExecutorActiveException.Create('Can only run one executor per thread');
+  CurrentExecutor := Self;
   FWaitingTasks:=0;
   FTerminated := False;
   FFiber := TMainFiber.Create;
@@ -618,7 +585,7 @@ begin
   if TasksWaiting then
     raise ESomethingWentHorriblyWrongException.Create('Stopped execution while some tasks still waiting... This should never happen');
   FreeAndNil(FFiber);
-  RemoveExecutor(Self);
+  CurrentExecutor := nil;
 end;
 
 procedure TExecutor.TerminateTaskAndFinish(ATask: TTask);
@@ -630,7 +597,7 @@ end;
 
 procedure TExecutor.StopRemainingTasks;
 var
-  ATask, Dependency: TTask;
+  ATask: TTask;
 begin
   // wakeup all sleeping tasks
   while not FSleepQueue.IsEmpty do
@@ -671,7 +638,6 @@ begin
   FTaskQueue := TTaskQueue.Create;
   FSleepQueue := TSleepQueue.Create;
   FCurrentTask := nil;
-  FThread := nil;
 end;
 
 destructor TExecutor.Destroy;
@@ -699,28 +665,28 @@ end;
 
 procedure TExecutorHelper.Await(ATask: TTask; FreeTask: Boolean);
 begin
-  if (TThread.CurrentThread <> FThread) or not Assigned(FCurrentTask) then
+  if (GetExecutor <> Self) or not Assigned(FCurrentTask) then
     raise ENotATaskException.Create('Can only await inside a task');
   FCurrentTask.Await(ATask, FreeTask);
 end;
 
 generic function TExecutorHelper.Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
 begin
-  if (TThread.CurrentThread <> FThread) or not Assigned(FCurrentTask) then
+  if (GetExecutor <> Self) or not Assigned(FCurrentTask) then
     raise ENotATaskException.Create('Can only await inside a task');
   Result := FCurrentTask.specialize Await<TResult>(ATask, FreeTask);
 end;
 
 procedure TExecutor.Yield;
 begin
-  if (TThread.CurrentThread <> FThread) or not Assigned(FCurrentTask) then
+  if (GetExecutor <> Self) or not Assigned(FCurrentTask) then
     raise ENotATaskException.Create('Can only yield inside an asynchronous job');
   FCurrentTask.Yield;
 end;
 
 procedure TExecutor.Sleep(time: QWord);
 begin
-  if (TThread.CurrentThread <> FThread) or not Assigned(FCurrentTask) then
+  if (GetExecutor <> Self) or not Assigned(FCurrentTask) then
     raise ENotATaskException.Create('Can only sleep inside an asynchronous job');
   FCurrentTask.Sleep(time);
 end;
@@ -743,7 +709,17 @@ end;
 
 function GetExecutor: TExecutor;
 begin
-  Result := TExecutor.GetExecutor(TThread.CurrentThread.ThreadID);
+  Result := CurrentExecutor;
+end;
+
+function GetCurrentTask: TTask;
+var
+  Executor: TExecutor;
+begin
+  Executor := GetExecutor;
+  if not Assigned(Executor) then
+    raise ENotATaskException.Create('No active executor on this thread');
+  Result := Executor.CurrentTask;
 end;
 
 procedure RunAsync(ATask: TTask; FreeTask: Boolean; RaiseErrors: Boolean);

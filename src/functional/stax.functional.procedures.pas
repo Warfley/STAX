@@ -1,4 +1,4 @@
-unit stax.tasks.functional.procedures;
+unit stax.functional.procedures;
 
 {$mode ObjFPC}{$H+}
 

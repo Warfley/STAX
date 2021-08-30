@@ -1,14 +1,14 @@
-unit stax.tasks.io.tcp;
+unit stax.asynctcp;
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  SysUtils, stax, stax.tasks.io, Sockets, Compatibility.sockets;
+  SysUtils, stax, stax.asyncio, stax.internal.tcp;
 
 type
-  TSocket = Compatibility.sockets.TSocket;
+  TSocket = stax.internal.tcp.TSocket;
 
   ESocketError = class(Exception);
   EConnectionClosedException = class(Exception);
@@ -82,6 +82,8 @@ function TCPServerSocket(AHost: String; APort: Integer): TSocket;
 procedure TCPServerListen(AServerSocket: TSocket; Backlog: Integer); inline;
 procedure TCPSocketClose(ASocket: TSocket); inline;
 implementation
+uses
+  Sockets;
 
 // Helper
 

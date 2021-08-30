@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, ExtCtrls, StdCtrls,
-  stax, stax.tasks.functional, stax.tasks.io.tcp;
+  stax, stax.functional, stax.asynctcp;
 
 type
   TPlayerMovement = (pmUp = -1, pmNone = 0, pmDown = 1);

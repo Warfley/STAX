@@ -1,5 +1,4 @@
 # STAX: Single Threaded Asynchronous Execution Framework
-**Warning: This is currently only a Proof of Concept implementation and not production ready!**
 
 STAX is a framework for developing single threaded asynchronous applications, similar to Javascript.
 It does so by organizing code execution in different `Tasks`, which are scheduled non-preemptive on a single thread. This avoids the problems typically associated with threading, such as race conditions or deadlocks, while providing the ability to write asynchronous and concurrent code.
@@ -45,7 +44,7 @@ Tasks are implemented through the `TTask` class for tasks that don't produce any
 To implement a task, simply inherit from either `TTask` or `TRVTask<T>` and implement the `Execute` method (similar to `TThread`).
 The result of `TRVTask<T>` has to be written into the field `FResult` which has `protected` visibility.
 
-To ease implementation the unit `stax.tasks.functional` implements tasks that can be created from function pointers.
+To ease implementation the unit `stax.functional` implements tasks that can be created from function pointers.
 At the moment it supports creating tasks from any function or procedure (both as simple function or as method/of object) with 0 to 4 parameter.
 Typing is handled via generics
 ```
@@ -66,10 +65,18 @@ Executor.Run; // Run until all tasks are finished
 Executor.Free;
 ```
 
+### Yield, Await and Sleep
 Tasks can yield to the executor by calling the `Yield` method of either themselves or of the executor.
-To schedule another task and wait for it to finish, they can make use of the `await` method.
+If the task wants to sleep for a certain amount of time, it provides the `Sleep` method.
+To schedule another task and wait for it to finish, they can make use of the `Await` method.
+Tasks can also be scheduled with `ScheduleForAwait` and be awaited afterwards.
+This can be useful if many tasks want should be executed in parallel, an can be awaited to wait until all are finished. 
+
+If all active tasks are awaiting or sleeping, the scheduler will call the the systems `Sleep` function to get load of the CPU.
+In the case where there is always at least one active task, it will never go to sleep and easily reach 100% CPU load.
+
 As there can only be one executor per thread, the executor of the current thread can be accessed via the global `GetExecutor` function.
-Also a global `Yield` and `Await` function is provided, which will call the respective method fo the executor of the current thread.
+Also a global `Yield`, `AsyncSleep` and `Await` function is provided, which will call the respective method for the executor of the current thread.
 `Await` can also be used to receive the result of an `TRVTask<T>`
 ```
 function MyFunc(AExecutor: TExecutor): Integer;
@@ -94,6 +101,21 @@ on E: Exception do
   // handle exception from the awaited task
 end;
 ``` 
+
+## Termination
+A tasks can be terminated at any time by calling its `Terminate` method.
+This method will then set the `Terminated` property of this task to `True`.
+When the task is yielded while this flag is set an exception `ETaskTerminatedException` is raised to notify the task.
+Unlike requiring the task to regularly check the `Terminated` flag and decide when to stop, this forces the task to act when it was terminated.
+If a task awaits a terminated task, it will be woken up with an `EAwaitedTaskTerminatedException` being raised.
+
+To stop the execution of the `TExecutor`, it also provides a `Terminate` method.
+This will cause the executor to, once it gets back control from the current task, to terminate and wake up all remaining tasks.
+
+A terminated task also has some restrictions.
+It cannot yield to the scheduler, sleep or await other tasks.
+Basically once terminated it must finish in the same scheduling cycle.
+This ensures a timely termination after the call of `Terminate`.
 
 ## Examples
 The examples directory contains three small examples.

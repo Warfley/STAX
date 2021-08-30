@@ -8,10 +8,9 @@ unit StaxPKG;
 interface
 
 uses
-  stax, stax.helpertypes, stax.tasks.functional, 
-  stax.tasks.functional.functions, stax.tasks.functional.procedures, 
-  stax.tasks.io, stax.tasks.io.console, stax.tasks.io.tcp, windows.fiber, 
-  Compatibility.Console, LazarusPackageIntf;
+  stax, stax.helpertypes, stax.functional, stax.functional.functions, 
+  stax.functional.procedures, stax.asyncio, stax.asyncconsole, stax.asynctcp, 
+  stax.internal.console, stax.internal.tcp, LazarusPackageIntf;
 
 implementation
 

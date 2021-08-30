@@ -1,11 +1,11 @@
-unit stax.tasks.functional;
+unit stax.functional;
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  Classes, stax, stax.tasks.functional.procedures, stax.tasks.functional.functions;
+  Classes, stax, stax.functional.procedures, stax.functional.functions;
 
 function AsyncProcedure(AProcedure: TTaskProcedure): TTask; overload;
 function AsyncProcedure(AProcedure: TTaskMethodProcedure): TTask; overload;

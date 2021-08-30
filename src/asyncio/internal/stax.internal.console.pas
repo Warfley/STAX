@@ -1,4 +1,4 @@
-unit Compatibility.Console;
+unit stax.internal.console;
 
 {$mode objfpc}{$H+}
 

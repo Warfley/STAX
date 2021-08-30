@@ -1,4 +1,4 @@
-unit compatibility.sockets;
+unit stax.internal.tcp;
 
 {$mode objfpc}{$H+}
 

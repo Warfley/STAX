@@ -3,7 +3,7 @@ program server;
 {$mode objfpc}{$H+}
 
 uses
-  stax, stax.tasks.io.tcp, stax.tasks.functional;
+  stax, stax.asynctcp, stax.functional;
 
 // simple tcp echo server
 procedure HandleConnection(AExecutor: TExecutor; AConnection: TSocket);

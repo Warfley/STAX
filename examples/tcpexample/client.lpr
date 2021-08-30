@@ -3,7 +3,7 @@ program client;
 {$mode objfpc}{$H+}
 
 uses
-  stax, stax.tasks.functional, stax.tasks.io.tcp, stax.tasks.io.console;
+  stax, stax.functional, stax.asynctcp, stax.asyncconsole;
 
 procedure SendUserInput(AExecutor: TExecutor; ASocket: Tsocket);
 var

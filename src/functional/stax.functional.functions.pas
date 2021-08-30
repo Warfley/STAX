@@ -1,4 +1,4 @@
-unit stax.tasks.functional.functions;
+unit stax.functional.functions;
 
 {$mode objfpc}{$H+}
 

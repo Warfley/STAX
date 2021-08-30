@@ -1,11 +1,11 @@
-unit stax.tasks.io.console;
+unit stax.asyncconsole;
 
 {$mode objfpc}{$H+}
 
 interface
 
 uses
-  SysUtils, stax, stax.tasks.io, Compatibility.Console;
+  SysUtils, stax, stax.asyncio, stax.internal.console;
 
 type
 

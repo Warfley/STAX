@@ -3,7 +3,7 @@ program exceptiontest;
 {$mode objfpc}{$H+}
 
 uses
-  SysUtils, stax, stax.tasks.functional;
+  SysUtils, stax, stax.functional;
 
 type
   ETestException = class(Exception);
