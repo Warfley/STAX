@@ -100,3 +100,5 @@ The examples directory contains three small examples.
 * `tasktest` provides a simple program that will call two tasks that count to 10, and will be scheduled parallel to each other as they yield each iteration when awaiting the printing task that will output the current number.
 * `exceptionstest` provides a small example of catching exceptions from another task
 * `tcpexample` implements a simple tcp echo server and tcp client, which runs completely single threaded and can handle multiple connections simultaniously
+* `stoptest` shows how to stop running tasks
+* `pong` provides a simple two player pong game via TCP, which incorporates STAX into LCL GUI applications

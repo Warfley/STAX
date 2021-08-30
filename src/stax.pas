@@ -94,7 +94,6 @@ type
 
     function ExtractError: Exception; {$IFDEF inlining}inline;{$ENDIF}
 
-    property Error: Exception read FError;
     property Status: TTaskStatus read FStatus;
     property Executor: TExecutor read FExecutor;
     property Terminated: Boolean read FTerminated;
@@ -173,7 +172,7 @@ type
     destructor Destroy; override;
 
     procedure RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True);
-    procedure ScheduleForAwait(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
+    function ScheduleForAwait(ATask: TTask): TTask; {$IFDEF inlining}inline;{$ENDIF}
     // For some reason this breaks fpc, so we added this as a type helper
     //procedure Await(ATask: TTask; FreeTask: Boolean = True);
     //generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
@@ -212,7 +211,7 @@ type
 
 function GetExecutor: TExecutor; {$IFDEF inlining}inline;{$ENDIF}
 procedure RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True); {$IFDEF inlining}inline;{$ENDIF}
-procedure ScheduleForAwait(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
+function ScheduleForAwait(ATask: TTask): TTask; {$IFDEF inlining}inline;{$ENDIF}
 procedure Await(ATask: TTask; FreeTask: Boolean = True); overload; {$IFDEF inlining}inline;{$ENDIF}
 generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload; {$IFDEF inlining}inline;{$ENDIF}
 procedure Yield; {$IFDEF inlining}inline;{$ENDIF}
@@ -498,13 +497,17 @@ begin
 end;
 
 procedure TExecutor.RaiseErrorHandler(Task: TTask);
+var
+  Err: Exception;
 begin
+  Err := Task.ExtractError;
   if FErrorHandler.isFirst then
-    FErrorHandler.First()(Task, Task.Error)
+    FErrorHandler.First()(Task, Err)
   else if FErrorHandler.isSecond then
-    FErrorHandler.Second()(Task, Task.Error)
+    FErrorHandler.Second()(Task, Err)
   else
-    raise EUnhandledError.Create(Task.ExtractError, Task);
+    raise EUnhandledError.Create(Err, Task);
+  Err.Free;
 end;
 
 procedure TExecutor.ScheduleTask(ATask: TTask);
@@ -688,9 +691,10 @@ begin
   ATask.Schedule(self, FreeTask, RaiseErrors);
 end;
 
-procedure TExecutor.ScheduleForAwait(ATask: TTask);
+function TExecutor.ScheduleForAwait(ATask: TTask): TTask;
 begin
   RunAsync(ATask, False, False);
+  Result := ATask;
 end;
 
 procedure TExecutorHelper.Await(ATask: TTask; FreeTask: Boolean);
@@ -752,14 +756,14 @@ begin
   Executor.RunAsync(ATask, FreeTask, RaiseErrors);
 end;
 
-procedure ScheduleForAwait(ATask: TTask);
+function ScheduleForAwait(ATask: TTask): TTask;
 var
   Executor: TExecutor;
 begin
   Executor := GetExecutor;
   if not Assigned(Executor) then
     raise ENotATaskException.Create('ScheduleForAwait can only be called from within a Task');
-  Executor.ScheduleForAwait(ATask);
+  Result := Executor.ScheduleForAwait(ATask);
 end;
 
 procedure Await(ATask: TTask; FreeTask: Boolean);

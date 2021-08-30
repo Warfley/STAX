@@ -73,13 +73,14 @@ function AsyncReceiveLn(ASocket: Tsocket): specialize TRVTask<String>; inline;
 function AsyncReceiveStr(ASocket: Tsocket; ALength: SizeInt): specialize TRVTask<String>; inline;
 
 function AsyncSend(ASocket: Tsocket; ABuffer: Pointer; ACount: SizeInt): TTask; overload; inline;
-generic function AsyncSend<T>(ASocket: Tsocket; AData: T): TTask; overload; inline;
+generic function AsyncSend<T>(ASocket: Tsocket; const AData: T): TTask; overload; inline;
 function AsyncSendLn(ASocket: Tsocket; const AData: String): TTask; inline;
 function AsyncSendStr(ASocket: Tsocket; const AData: String): TTask; inline;
 
 function TCPSocket: TSocket; inline;
 function TCPServerSocket(AHost: String; APort: Integer): TSocket;
 procedure TCPServerListen(AServerSocket: TSocket; Backlog: Integer); inline;
+procedure TCPSocketClose(ASocket: TSocket); inline;
 implementation
 
 // Helper
@@ -183,6 +184,11 @@ procedure TCPServerListen(AServerSocket: TSocket; Backlog: Integer);
 begin
   if fplisten(AServerSocket, Backlog) <> 0 then raise
     ESocketError.Create('Error starting listening ' + socketerror.ToString);
+end;
+
+procedure TCPSocketClose(ASocket: TSocket);
+begin
+  Close(ASocket);
 end;
 
 { TNonBlockingTCPSender }

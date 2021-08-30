@@ -17,6 +17,8 @@ procedure RestoreBlocking(ASocket: Tsocket; OldState: Integer);
 
 function SocketInvalid(ASocket: TSocket): Boolean; inline;
 
+procedure Close(ASocket: TSocket);
+
 procedure FD_CLR(ASocket: TSocket; var FDSet: TFDSet); inline;
 function FD_ISSET(ASocket: TSocket; var FDSet: TFDSet): Boolean; inline;
 procedure FD_SET(ASocket: TSocket; var FDSet: TFDSet); inline;
@@ -26,6 +28,15 @@ function select(nfds: Integer; ReadFDs,  WriteFDs, ExceptFDs: PFDSet; Timeout: P
 function WasBlockingError(AError: Integer): Boolean; inline;
 
 implementation
+
+procedure Close(ASocket: TSocket);
+begin
+  {$IfDef Windows}
+  WinSock2.closesocket(ASocket);
+  {$Else}
+  fpClose(ASocket);
+  {$EndIf}
+end;
 
 procedure FD_CLR(ASocket: TSocket; var FDSet: TFDSet);
 begin
@@ -87,7 +98,7 @@ var
   nonblock: u_long;
 begin
   nonblock := 1;
-  ioctlsocket(ASocket, FIONBIO, @nonblock);
+  ioctlsocket(ASocket, LongInt(FIONBIO), @nonblock);
   Result := 0;
 end;
 {$Else}
@@ -103,7 +114,7 @@ var
   nonblock: u_long;
 begin
   nonblock := OldState;
-  ioctlsocket(ASocket, FIONBIO, @nonblock);
+  ioctlsocket(ASocket, LongInt(FIONBIO), @nonblock);
 end;
 {$Else}
 begin
