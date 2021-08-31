@@ -70,13 +70,14 @@ Tasks can yield to the executor by calling the `Yield` method of either themselv
 If the task wants to sleep for a certain amount of time, it provides the `Sleep` method.
 To schedule another task and wait for it to finish, they can make use of the `Await` method.
 Tasks can also be scheduled with `ScheduleForAwait` and be awaited afterwards.
-This can be useful if many tasks want should be executed in parallel, an can be awaited to wait until all are finished. 
+To await multiple Tasks the `AwaitAll` method can be used.
+It can be configured to either ignore exceptions, terminate all Tasks once the first exception was raised, or accumulate exceptions and raise them after all tasks finished or raised an exception.
 
 If all active tasks are awaiting or sleeping, the scheduler will call the the systems `Sleep` function to get load of the CPU.
 In the case where there is always at least one active task, it will never go to sleep and easily reach 100% CPU load.
 
 As there can only be one executor per thread, the executor of the current thread can be accessed via the global `GetExecutor` function.
-Also a global `Yield`, `AsyncSleep` and `Await` function is provided, which will call the respective method for the executor of the current thread.
+Also a global `Yield`, `AsyncSleep`, `Await` and `AwaitAll` function is provided, which will call the respective method for the executor of the current thread.
 `Await` can also be used to receive the result of an `TRVTask<T>`
 ```
 function MyFunc(AExecutor: TExecutor): Integer;
@@ -118,9 +119,10 @@ Basically once terminated it must finish in the same scheduling cycle.
 This ensures a timely termination after the call of `Terminate`.
 
 ## Examples
-The examples directory contains three small examples.
+The examples directory contains a few small examples.
 * `tasktest` provides a simple program that will call two tasks that count to 10, and will be scheduled parallel to each other as they yield each iteration when awaiting the printing task that will output the current number.
 * `exceptionstest` provides a small example of catching exceptions from another task
 * `tcpexample` implements a simple tcp echo server and tcp client, which runs completely single threaded and can handle multiple connections simultaniously
 * `stoptest` shows how to stop running tasks
+  `awaitalltest` shows the usage of the `AwaitAll` function  with respect to exceptions
 * `pong` provides a simple two player pong game via TCP, which incorporates STAX into LCL GUI applications
