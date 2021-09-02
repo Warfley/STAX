@@ -5,7 +5,7 @@ unit stax.asyncio;
 interface
 
 uses
-  SysUtils, stax;
+  SysUtils, Classes, stax;
 
 type
 
@@ -21,7 +21,7 @@ type
     constructor Create(AsyncSleepTime: Integer);
 
     function TryRead(ABuffer: Pointer; ACount: SizeInt): SizeInt; virtual; abstract;
-    procedure AsyncRead(AExecutor: TExecutor; ABuffer: Pointer; ACount: SizeInt);
+    function AsyncRead(AExecutor: TExecutor; ABuffer: Pointer; ACount: SizeInt; AwaitFullData: Boolean): SizeInt;
   end;
 
   { TIOWriter }
@@ -33,7 +33,7 @@ type
     constructor Create(AsyncSleepTime: Integer);
 
     function TryWrite(ABuffer: Pointer; ACount: SizeInt): SizeInt; virtual; abstract;
-    procedure AsyncWrite(AExecutor: TExecutor; ABuffer: Pointer; ACount: SizeInt);
+    function AsyncWrite(AExecutor: TExecutor; ABuffer: Pointer; ACount: SizeInt; AwaitFullData: Boolean): SizeInt;
   end;
 
   { TIOReadTask }
@@ -51,16 +51,19 @@ type
 
   { TIOBufferReadTask }
 
-  TIOBufferReadTask = class(TTask)
+  TIOBufferReadTask = class(specialize TRVTask<SizeInt>)
   private
     FReader: TIOReader;
     FBuffer: Pointer;
     FCount: SizeInt;
     FOwnsReader: Boolean;
+    FAwaitFullData: Boolean;
   protected
     procedure Execute; override;
   public
-    constructor Create(AReader: TIOReader; ABuffer: Pointer; ACount: SizeInt; AOwnsReader: Boolean = True);
+    constructor Create(AReader: TIOReader; ABuffer: Pointer; ACount: SizeInt;
+                       AAwaitFullData: Boolean;
+                       AOwnsReader: Boolean = True);
     destructor Destroy; override;
   end;                                                                           
 
@@ -86,14 +89,19 @@ type
     FCount: SizeInt;
     FPattern: String;
     FOwnsReader: Boolean;
+    FAwaitFullData: Boolean;
 
     function ReadTo: String;
     function ReadCount: String;
   protected
     procedure Execute; override;
   public
-    constructor Create(AReader: TIOReader; ACount: SizeInt; AOwnsReader: Boolean = True);
-    constructor Create(AReader: TIOReader; APattern: String; AMaxCount: SizeInt = 0; AOwnsReader: Boolean = True);
+    constructor Create(AReader: TIOReader; ACount: SizeInt;
+                       AAwaitFullData: Boolean;
+                       AOwnsReader: Boolean = True);
+    constructor Create(AReader: TIOReader; APattern: String;
+                       AMaxCount: SizeInt = 0; AAwaitFullData: Boolean = True;
+                       AOwnsReader: Boolean = True);
     destructor Destroy; override;
   end;
 
@@ -113,49 +121,93 @@ type
 
   { TIOBufferWriteTask }
 
-  TIOBufferWriteTask = class(TTask)
+  TIOBufferWriteTask = class(specialize TRVTask<SizeInt>)
   private
     FWriter: TIOWriter;
     FBuffer: Pointer;
     FCount: SizeInt;
     FOwnsWriter: Boolean;
+    FAwaitFullData: Boolean;
   protected
     procedure Execute; override;
   public
-    constructor Create(AWriter: TIOWriter; ABuffer: Pointer; ACount: SizeInt; AOwnsWriter: Boolean = True);
+    constructor Create(AWriter: TIOWriter; ABuffer: Pointer; ACount: SizeInt;
+      AAwaitFullData: Boolean; AOwnsWriter: Boolean = True);
     destructor Destroy; override;
   end;
 
   { TIOStringWriteTask }
 
-  TIOStringWriteTask = class(TTask)
+  TIOStringWriteTask = class(specialize TRVTask<SizeInt>)
   private
     FWriter: TIOWriter;
     FData: String;
     FOwnsWriter: Boolean;
+    FAwaitFullData: Boolean;
   protected
     procedure Execute; override;
   public
-    constructor Create(AWriter: TIOWriter; const AData: String; AOwnsWriter: Boolean = True);
+    constructor Create(AWriter: TIOWriter; const AData: String;
+      AAwaitFullData: Boolean; AOwnsWriter: Boolean = True);
     destructor Destroy; override;
   end;
 
+  { TAsyncStream }
+
+  TAsyncStream = class(TStream)
+  private
+    FReader: TIOReader;
+    FWriter: TIOWriter;
+    FExecutor: TExecutor;
+  public
+    function Read(var Buffer; Count: Longint): Longint; override;
+    function Write(const Buffer; Count: Longint): Longint; override;
+
+    constructor Create(AReader: TIOReader; AWriter: TIOWriter; AExecutor: TExecutor);
+  end;
+
 implementation
+
+{ TAsyncStream }
+
+function TAsyncStream.Read(var Buffer; Count: Longint): Longint;
+begin
+  if not Assigned(FReader) then
+    ReadNotImplemented;
+  Result := FReader.AsyncRead(FExecutor, @Buffer, Count, False);
+end;
+
+function TAsyncStream.Write(const Buffer; Count: Longint): Longint;
+begin
+  if not Assigned(FWriter) then
+    WriteNotImplemented;
+  Result := FWriter.AsyncWrite(FExecutor, @Buffer, Count, False);
+end;
+
+constructor TAsyncStream.Create(AReader: TIOReader; AWriter: TIOWriter;
+  AExecutor: TExecutor);
+begin
+  inherited Create;
+  FReader := AReader;
+  FWriter := AWriter;
+  FExecutor := AExecutor;
+end;
 
 { TIOStringWriteTask }
 
 procedure TIOStringWriteTask.Execute;
 begin
-  FWriter.AsyncWrite(Executor, @FData[1], FData.Length);
+  FResult := FWriter.AsyncWrite(Executor, @FData[1], FData.Length, FAwaitFullData);
 end;
 
-constructor TIOStringWriteTask.Create(AWriter: TIOWriter; const AData: String;
+constructor TIOStringWriteTask.Create(AWriter: TIOWriter; const AData: String; AAwaitFullData: Boolean;
   AOwnsWriter: Boolean);
 begin
   inherited Create;
   FWriter := AWriter;
   FOwnsWriter := AOwnsWriter;
   FData := AData;
+  FAwaitFullData := AAwaitFullData;
 end;
 
 destructor TIOStringWriteTask.Destroy;
@@ -168,17 +220,18 @@ end;
 
 procedure TIOBufferWriteTask.Execute;
 begin
-  FWriter.AsyncWrite(Executor, FBuffer, FCount);
+  FResult := FWriter.AsyncWrite(Executor, FBuffer, FCount, FAwaitFullData);
 end;
 
 constructor TIOBufferWriteTask.Create(AWriter: TIOWriter; ABuffer: Pointer;
-  ACount: SizeInt; AOwnsWriter: Boolean);
+  ACount: SizeInt; AAwaitFullData: Boolean; AOwnsWriter: Boolean);
 begin
   inherited Create;
   FWriter := AWriter;
   FOwnsWriter := AOwnsWriter;
   FBuffer := ABuffer;
   FCount := ACount;
+  FAwaitFullData := AAwaitFullData;
 end;
 
 destructor TIOBufferWriteTask.Destroy;
@@ -191,7 +244,7 @@ end;
 
 procedure TIOWriteTask.Execute;
 begin
-  FWriter.AsyncWrite(Executor, @FData, SizeOf(T));
+  FWriter.AsyncWrite(Executor, @FData, SizeOf(T), True);
 end;
 
 constructor TIOWriteTask.Create(AWriter: TIOWriter; const AData: T;
@@ -214,16 +267,14 @@ begin
   FAsyncSleepTime := AsyncSleepTime;
 end;
 
-procedure TIOReader.AsyncRead(AExecutor: TExecutor; ABuffer: Pointer;
-  ACount: SizeInt);
-var
-  BytesRead: SizeInt;
+function TIOReader.AsyncRead(AExecutor: TExecutor; ABuffer: Pointer;
+  ACount: SizeInt; AwaitFullData: Boolean): SizeInt;
 begin
-  BytesRead := 0;
-  while BytesRead < ACount do
+  Result := 0;
+  while (AwaitFullData and (Result < ACount)) or (Result = 0) do
   begin
-    BytesRead += TryRead(@PByte(ABuffer)[BytesRead], ACount - BytesRead);
-    if BytesRead < ACount then
+    Result += TryRead(@PByte(ABuffer)[Result], ACount - Result);
+    if (Result = 0) or (AwaitFullData and (Result < ACount)) then
       AExecutor.Sleep(FAsyncSleepTime);
   end;
 end;
@@ -233,16 +284,14 @@ begin
   FAsyncSleepTime := AsyncSleepTime;
 end;
 
-procedure TIOWriter.AsyncWrite(AExecutor: TExecutor; ABuffer: Pointer;
-  ACount: SizeInt);
-var
-  BytesWritten: SizeInt;
+function TIOWriter.AsyncWrite(AExecutor: TExecutor; ABuffer: Pointer;
+  ACount: SizeInt; AwaitFullData: Boolean): SizeInt;
 begin
-  BytesWritten := 0;
-  while BytesWritten < ACount do
+  Result := 0;
+  while (Result = 0) or (AwaitFullData and (Result < ACount)) do
   begin
-    BytesWritten += TryWrite(@PByte(ABuffer)[BytesWritten], ACount - BytesWritten);
-    if BytesWritten < ACount then
+    Result += TryWrite(@PByte(ABuffer)[Result], ACount - Result);
+    if (Result = 0) or (AwaitFullData and (Result < ACount)) then
       AExecutor.Sleep(FAsyncSleepTime);
   end;
 end;
@@ -255,7 +304,6 @@ var
   len: integer;
   pLen: integer;
   backtrack: integer;
-  Success: SizeInt;
 begin
   Result := '';
   SetLength(Result, 128);
@@ -265,7 +313,7 @@ begin
   try
     while (FCount <= 0) or (len < FCount) do
     begin
-      FReader.AsyncRead(Executor, @c, SizeOf(c));
+      FReader.AsyncRead(Executor, @c, SizeOf(c), True);
       Result[len + 1] := c;
       Inc(len);
       if len = Result.Length then
@@ -302,8 +350,9 @@ end;
 
 function TIOStringReadTask.ReadCount: String;
 begin
+  Result := '';
   SetLength(Result, FCount);
-  FReader.AsyncRead(Executor, @FResult[1], FCount);
+  FReader.AsyncRead(Executor, @FResult[1], FCount, FAwaitFullData);
 end;
 
 procedure TIOStringReadTask.Execute;
@@ -322,23 +371,25 @@ begin
 end;
 
 constructor TIOStringReadTask.Create(AReader: TIOReader; ACount: SizeInt;
-  AOwnsReader: Boolean);
+  AAwaitFullData: Boolean; AOwnsReader: Boolean);
 begin
   inherited Create;
   FReader := AReader;
   FPattern := '';
   FCount := ACount;
   FOwnsReader := AOwnsReader;
+  FAwaitFullData := AAwaitFullData;
 end;
 
 constructor TIOStringReadTask.Create(AReader: TIOReader; APattern: String;
-  AMaxCount: SizeInt; AOwnsReader: Boolean);
+  AMaxCount: SizeInt; AAwaitFullData: Boolean; AOwnsReader: Boolean);
 begin
   inherited Create;
   FReader := AReader;
   FPattern := APattern;
   FCount := AMaxCount;
   FOwnsReader := AOwnsReader;
+  FAwaitFullData := AAwaitFullData;
 end;
 
 { TIOArrayReadTask }
@@ -346,7 +397,7 @@ end;
 procedure TIOArrayReadTask.Execute;
 begin
   SetLength(FResult, FCount);
-  FReader.AsyncRead(Executor, PByte(@FResult[0]), FCount * SizeOf(T));
+  FReader.AsyncRead(Executor, PByte(@FResult[0]), FCount * SizeOf(T), True);
 end;
 
 constructor TIOArrayReadTask.Create(AReader: TIOReader; ACount: SizeInt;
@@ -369,17 +420,18 @@ end;
 
 procedure TIOBufferReadTask.Execute;
 begin
-  FReader.AsyncRead(Executor, FBuffer, FCount);
+  FResult := FReader.AsyncRead(Executor, FBuffer, FCount, FAwaitFullData);
 end;
 
 constructor TIOBufferReadTask.Create(AReader: TIOReader; ABuffer: Pointer;
-  ACount: SizeInt; AOwnsReader: Boolean);
+  ACount: SizeInt; AAwaitFullData: Boolean; AOwnsReader: Boolean);
 begin
   inherited Create;
   FReader := AReader;
   FBuffer := ABuffer;
   FCount := ACount;
   FOwnsReader := AOwnsReader;
+  FAwaitFullData := AAwaitFullData;
 end;
 
 destructor TIOBufferReadTask.Destroy;
@@ -393,7 +445,7 @@ end;
 
 procedure TIOReadTask.Execute;
 begin
-  FReader.AsyncRead(Executor, @FResult, SizeOf(FResult));
+  FReader.AsyncRead(Executor, @FResult, SizeOf(FResult), True);
 end;
 
 constructor TIOReadTask.Create(AReader: TIOReader; AOwnsReader: Boolean);

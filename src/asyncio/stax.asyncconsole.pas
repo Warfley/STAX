@@ -25,7 +25,7 @@ const
   ConsoleSleepTime = 50;
 
 function AsyncConsoleRead(DirectRead: Boolean = False): specialize TRVTask<Char>; overload;
-function AsyncConsoleRead(Count: SizeInt; DirectRead: Boolean = False): specialize TRVTask<String>; overload;
+function AsyncConsoleRead(Count: SizeInt; DirectRead: Boolean = False; AwaitFullData: Boolean = True): specialize TRVTask<String>; overload;
 function AsyncConsoleReadLn(DirectRead: Boolean = False): specialize TRVTask<String>; overload;
 function AsyncConsoleReadLn(MaxLength: SizeInt;DirectRead: Boolean = False): specialize TRVTask<String>; overload;
 
@@ -36,9 +36,9 @@ begin
   Result := (specialize TIOReadTask<Char>).Create(TConsoleReader.Create(DirectRead));
 end;
 
-function AsyncConsoleRead(Count: SizeInt; DirectRead: Boolean = False): specialize TRVTask<String>;
+function AsyncConsoleRead(Count: SizeInt; DirectRead: Boolean = False; AwaitFullData: Boolean = True): specialize TRVTask<String>;
 begin
-  Result := TIOStringReadTask.Create(TConsoleReader.Create(DirectRead), Count);
+  Result := TIOStringReadTask.Create(TConsoleReader.Create(DirectRead), Count, AwaitFullData);
 end;
 
 function AsyncConsoleReadLn(DirectRead: Boolean = False): specialize TRVTask<String>;

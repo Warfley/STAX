@@ -34,6 +34,7 @@ type
 
   protected
     procedure Execute; override;
+  public
     constructor Create(ASocket: Tsocket; const AHost: String; APort: Integer);
   end;
 
@@ -42,9 +43,8 @@ type
   TNonBlockingTCPReceiver = class(TIOReader)
   private
     FSocket: TSocket;
-  protected
-    function TryRead(ABuffer: Pointer; ACount: SizeInt): SizeInt; override;
   public
+    function TryRead(ABuffer: Pointer; ACount: SizeInt): SizeInt; override;
     constructor Create(ASocket: TSocket);
   end;
 
@@ -53,9 +53,8 @@ type
   TNonBlockingTCPSender = class(TIOWriter)
   private
     FSocket: TSocket;
-  protected
-    function TryWrite(ABuffer: Pointer; ACount: SizeInt): SizeInt; override;
   public
+    function TryWrite(ABuffer: Pointer; ACount: SizeInt): SizeInt; override;
     constructor Create(ASocket: TSocket);
   end;
 
@@ -66,11 +65,11 @@ const
 function AsyncAccept(AServerSocket: TSocket): specialize TRVTask<TSocket>; inline;
 function AsyncConnect(ASocket: TSocket; const AHost: string; APort: Integer): TTask; inline;
 
-function AsyncReceive(ASocket: Tsocket; ABuffer: Pointer; ACount: SizeInt):  TTask; overload; inline;
+function AsyncReceive(ASocket: Tsocket; ABuffer: Pointer; ACount: SizeInt; AwaitFullData: Boolean = True):  TTask; overload; inline;
 generic function AsyncReceive<T>(ASocket: Tsocket): specialize TRVTask<T>; overload; inline;
 generic function AsyncReceive<T>(ASocket: Tsocket; ACount: SizeInt): specialize TRVTask<specialize TArray<T>>; overload; inline;
 function AsyncReceiveLn(ASocket: Tsocket): specialize TRVTask<String>; inline;
-function AsyncReceiveStr(ASocket: Tsocket; ALength: SizeInt): specialize TRVTask<String>; inline;
+function AsyncReceiveStr(ASocket: Tsocket; ALength: SizeInt; AwaitFullData: Boolean = True): specialize TRVTask<String>; inline;
 
 function AsyncSend(ASocket: Tsocket; ABuffer: Pointer; ACount: SizeInt): TTask; overload; inline;
 generic function AsyncSend<T>(ASocket: Tsocket; const AData: T): TTask; overload; inline;
@@ -117,9 +116,10 @@ begin
   Result := TConnectTask.Create(ASocket, AHost, APort);
 end;
 
-function AsyncReceive(ASocket: Tsocket; ABuffer: Pointer; ACount: SizeInt):  TTask;
+function AsyncReceive(ASocket: Tsocket; ABuffer: Pointer; ACount: SizeInt;
+  AwaitFullData: Boolean):  TTask;
 begin
-  Result := TIOBufferReadTask.Create(TNonBlockingTCPReceiver.Create(ASocket), ABuffer, ACount);
+  Result := TIOBufferReadTask.Create(TNonBlockingTCPReceiver.Create(ASocket), ABuffer, ACount, AwaitFullData);
 end;
 
 generic function AsyncReceive<T>(ASocket: Tsocket): specialize TRVTask<T>;
@@ -137,15 +137,16 @@ begin
   Result := TIOStringReadTask.Create(TNonBlockingTCPReceiver.Create(ASocket), #10);
 end;
 
-function AsyncReceiveStr(ASocket: Tsocket; ALength: SizeInt): specialize TRVTask<String>;
+function AsyncReceiveStr(ASocket: Tsocket; ALength: SizeInt;
+  AwaitFullData: Boolean): specialize TRVTask<String>;
 begin
-  Result := TIOStringReadTask.Create(TNonBlockingTCPReceiver.Create(ASocket), ALength);
+  Result := TIOStringReadTask.Create(TNonBlockingTCPReceiver.Create(ASocket), ALength, AwaitFullData);
 end;
 
 function AsyncSend(ASocket: Tsocket; ABuffer: Pointer; ACount: SizeInt
   ): TTask;
 begin
-  Result := TIOBufferWriteTask.Create(TNonBlockingTCPSender.Create(ASocket), ABuffer, ACount);
+  Result := TIOBufferWriteTask.Create(TNonBlockingTCPSender.Create(ASocket), ABuffer, ACount, True);
 end;
 
 generic function AsyncSend<T>(ASocket: Tsocket; const AData: T): TTask; overload; inline;
@@ -155,12 +156,12 @@ end;
 
 function AsyncSendLn(ASocket: Tsocket; const AData: String): TTask;
 begin
-  Result := TIOStringWriteTask.Create(TNonBlockingTCPSender.Create(ASocket), AData.Trim + #10);
+  Result := TIOStringWriteTask.Create(TNonBlockingTCPSender.Create(ASocket), AData.Trim + #10, True);
 end;
 
 function AsyncSendStr(ASocket: Tsocket; const AData: String): TTask;
 begin
-  Result := TIOStringWriteTask.Create(TNonBlockingTCPSender.Create(ASocket), AData);
+  Result := TIOStringWriteTask.Create(TNonBlockingTCPSender.Create(ASocket), AData, True);
 end;
 
 function TCPSocket: TSocket;
@@ -294,7 +295,7 @@ end;
 
 procedure TAcceptTask.Execute;
 var
-  OldState, blocking, err: LongInt;
+  OldState, err: LongInt;
   Conn: TSocket;
 begin
   OldState := SetNonBlocking(FServerSocket);
