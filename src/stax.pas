@@ -8,7 +8,7 @@ unit stax;
 interface
 
 uses
-  Classes, SysUtils, math, gpriorityqueue, Generics.Collections, stax.helpertypes,
+  Classes, SysUtils, math, Generics.Collections, stax.helpertypes,
   fibers;
 
 type
@@ -75,7 +75,7 @@ type
     destructor Destroy; override;
   end;
 
-  TTaskStatus = (tsNone=0, tsScheduled, tsRescheduled, tsWaiting, tsRunning, tsFinished, tsError);
+  TTaskStatus = (tsNone=0, tsScheduled, tsRescheduled, tsWaiting, tsSleeping, tsRunning, tsFinished, tsError);
 
   { TTask }
 
@@ -159,7 +159,7 @@ type
     TSleepQueueComparator = class
       public class function c(constref A, B: TSleepQueueEntry): Boolean; static; inline;
     end;
-    TSleepQueue = specialize TPriorityQueue<TSleepQueueEntry, TSleepQueueComparator>;
+    TSleepQueue = specialize TMinHeap<TSleepQueueEntry, TSleepQueueComparator>;
   private
     FErrorHandler: TErrorHandler;
     FTaskQueue: TTaskQueue;
@@ -171,6 +171,7 @@ type
 
     procedure RaiseErrorHandler(Task: TTask); {$IFDEF inlining}inline;{$ENDIF}
     procedure ScheduleTask(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
+    procedure RemoveSleepingTask(ATask: TTask);
     procedure ExecTask(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
     procedure FinalizeTask(ATask: TTask);
     function HandleSleepQueue: QWord;
@@ -370,7 +371,7 @@ end;
 
 procedure TTask.Reschedule;
 begin
-  if FStatus < tsWaiting then
+  if not (FStatus in [tsWaiting, tsSleeping, tsRunning]) then
     Exit;
   if FStatus = tsWaiting then
     FExecutor.RemoveWaitingTask(Self);
@@ -431,7 +432,9 @@ end;
 procedure TTaskHelper.Await(ATask: TTask; FreeTask: Boolean);
 var
   Err: Exception;
+  TaskTerminated: ETaskTerminatedException;
 begin
+  TaskTerminated := nil;
   try
     if FExecutor.FCurrentTask <> Self then
       raise ETaskNotActiveException.Create('Only an active task can await');
@@ -448,8 +451,27 @@ begin
     begin
       // add as dependency to that task in order to be notified when it finishes
       AddDependency(ATask);
-      // then wait until we are woken up
-      Wait;
+      // if we are woken up due to a terminate, we need to still wait for the other task to perform memory management
+      while ATask.Status < tsFinished do
+        try
+          Wait;
+        except on E: ETaskTerminatedException do
+          if not Assigned(TaskTerminated) then
+          begin
+          // so we can wait agian
+          FTerminated := False;
+          // remember to re-raise
+          TaskTerminated := ETaskTerminatedException(AcquireExceptionObject);
+          // Terminate task we are awaiting
+          ATask.Terminate;
+          end;
+        end;
+    end;
+    // If terminated, restore termination state
+    if Assigned(TaskTerminated) then
+    begin
+      FTerminated := True;
+      raise TaskTerminated;
     end;
     // Check for errors
     if ATask.Status = tsError then
@@ -572,7 +594,9 @@ end;
 
 var
   AError: EMultiTaskException;
+  TaskTerminated: ETaskTerminatedException;
 begin
+  TaskTerminated := nil;
   CheckAssumptions; 
   // If already one task raised an exception
   // we might not need to start working in the first place
@@ -590,8 +614,29 @@ begin
         if Assigned(AError) then
           TerminateRunningTasks;
       end;
-      // Wait until we are woken up by one of the tasks finishing
-      Wait;
+      // Wait until we are woken up by one of the tasks finishing or by termination
+      try
+        Wait;
+      except on E: ETaskTerminatedException do
+        if not Assigned(TaskTerminated) then
+        begin
+          // We don't handle errors as we are going to raise ETaskTerminatedException
+          ExceptionBehavior := ebIgnore;
+          FreeAndNil(AError);
+          // so we can wait agian
+          FTerminated := False;
+          // remember to re-raise
+          TaskTerminated := ETaskTerminatedException(AcquireExceptionObject);
+          // terminate all tasks we are awaiting
+          TerminateRunningTasks;
+        end;
+      end;
+    end;
+    // If terminated, restore termination state and raise error
+    if Assigned(TaskTerminated) then
+    begin
+      FTerminated := True;
+      raise TaskTerminated;
     end;
     // if we accumulate errors, we do so at the end
     // also if we want to report the first error but haven't found one yet,
@@ -618,7 +663,8 @@ begin
   if FTerminated then
     raise ETaskAlreadyTerminatedException.Create('Can''t sleep in an already terminated task. Just finish up!');
   FExecutor.QueueSleep(Self, Time);
-  Wait;
+  FStatus := tsSleeping;
+  Yield;
 end;
 
 function TTask.ExtractError: Exception;
@@ -629,7 +675,12 @@ end;
 
 procedure TTask.Terminate;
 begin
+  // Set terminated
   FTerminated := True;
+  // Wake up if sleeping or waiting
+  if FStatus = tsSleeping then
+    FExecutor.RemoveSleepingTask(Self);
+  Reschedule;
 end;
 
 { TRVTask }
@@ -648,7 +699,7 @@ end;
 class function TExecutor.TSleepQueueComparator.c(constref A, B: TSleepQueueEntry
   ): Boolean;
 begin
-  Result := A.First > B.First;
+  Result := A.First < B.First;
 end;
 
 { EUnhandledError }
@@ -673,6 +724,11 @@ var
   Err: Exception;
 begin
   Err := Task.ExtractError;
+  if Err is ETaskTerminatedException then
+  begin
+    Err.Free;
+    Exit;
+  end;
   if FErrorHandler.isFirst then
     FErrorHandler.First()(Task, Err)
   else if FErrorHandler.isSecond then
@@ -685,6 +741,18 @@ end;
 procedure TExecutor.ScheduleTask(ATask: TTask);
 begin
   FTaskQueue.Enqueue(ATask);
+end;
+
+procedure TExecutor.RemoveSleepingTask(ATask: TTask);
+var
+  i: SizeInt;
+begin
+  for i := 0 to SizeInt(FSleepQueue.Elements.Size) - 1 do
+    if FSleepQueue.Elements.Mutable[i]^.Second = ATask then
+    begin
+      FSleepQueue.Delete(i);
+      Break;
+    end;
 end;
 
 procedure TExecutor.ExecTask(ATask: TTask);
@@ -712,13 +780,10 @@ var
 begin
   Result := MaxWaitingTime;
   CurrTime := GetTickCount64;
-  while not FSleepQueue.IsEmpty and (FSleepQueue.Top.First < CurrTime) do
-  begin
-    FSleepQueue.Top.Second.Reschedule;
-    FSleepQueue.Pop;
-  end;
-  if not FSleepQueue.IsEmpty then
-    Result := Min(FSleepQueue.Top.First - CurrTime, MaxWaitingTime);
+  while not FSleepQueue.Empty and (FSleepQueue.First^.First < CurrTime) do
+    FSleepQueue.ExtractFirst.Second.Reschedule;
+  if not FSleepQueue.Empty then
+    Result := Min(FSleepQueue.First^.First - CurrTime, MaxWaitingTime);
 end;
 
 procedure TExecutor.QueueSleep(ATask: TTask; ATime: QWord);
@@ -726,7 +791,7 @@ var
   EndTime: QWord;
 begin
   EndTime := GetTickCount64 + ATime;
-  FSleepQueue.Push(specialize Pair<QWord, TTask>(EndTime, ATask));
+  FSleepQueue.Insert(specialize Pair<QWord, TTask>(EndTime, ATask));
 end;
 
 procedure TExecutor.AddWaitingTask(ATask: TTask);
@@ -761,7 +826,7 @@ var
   NextTask: TTask;
   SleepTime: QWord;
 begin
-  while not FTerminated and ((FTaskQueue.Count > 0) or not FSleepQueue.IsEmpty or TasksWaiting) do
+  while not FTerminated and ((FTaskQueue.Count > 0) or not FSleepQueue.Empty or TasksWaiting) do
   begin
     SleepTime := HandleSleepQueue;
     if FTaskQueue.Count = 0 then
@@ -774,9 +839,9 @@ begin
       // if task is not finished, reschedule
       if NextTask.Status < tsFinished then
       begin
-        // but only if the task is not set to waiting
-        // if its waiting we wait for it to be "woken up"
-        if NextTask.Status <> tsWaiting then
+        // but only if the task is running
+        // if its waiting or sleeping we wait for it to be "woken up"
+        if NextTask.Status = tsRunning then
           NextTask.Reschedule;
       end
       else
@@ -806,11 +871,8 @@ var
   ATask: TTask;
 begin
   // wakeup all sleeping tasks
-  while not FSleepQueue.IsEmpty do
-  begin
-    FSleepQueue.Top.Second.Reschedule;
-    FSleepQueue.Pop;
-  end;
+  while not FSleepQueue.Empty do
+    FSleepQueue.ExtractFirst.Second.Reschedule;
   // stop all scheduled tasks
   while FTaskQueue.Count > 0 do
   begin

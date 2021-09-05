@@ -152,6 +152,24 @@ type
     destructor Destroy; override;
   end;
 
+  { TIOArrayWriteTask }
+
+  generic TIOArrayWriteTask<T> = class(specialize TRVTask<SizeInt>)
+  public type
+    TDataArray = array of T;
+  private
+    FWriter: TIOWriter;
+    FData: TDataArray;
+    FOwnsWriter: Boolean;
+    FAwaitFullData: Boolean;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AWriter: TIOWriter; const AData: TDataArray;
+      AAwaitFullData: Boolean; AOwnsWriter: Boolean = True);
+    destructor Destroy; override;
+  end;
+
   { TAsyncStream }
 
   TAsyncStream = class(TStream)
@@ -211,6 +229,29 @@ begin
 end;
 
 destructor TIOStringWriteTask.Destroy;
+begin
+  if FOwnsWriter then FWriter.Free;
+  inherited Destroy;
+end;
+
+{ TIOArrayWriteTask }
+
+procedure TIOArrayWriteTask.Execute;
+begin
+  FResult := FWriter.AsyncWrite(Executor, @FData[0], Length(FData) * SizeOf(T), FAwaitFullData);
+end;
+
+constructor TIOArrayWriteTask.Create(AWriter: TIOWriter;
+  const AData: TDataArray; AAwaitFullData: Boolean; AOwnsWriter: Boolean);
+begin
+  inherited Create;
+  FWriter := AWriter;
+  FOwnsWriter := AOwnsWriter;
+  FData := AData;
+  FAwaitFullData := AAwaitFullData;
+end;
+
+destructor TIOArrayWriteTask.Destroy;
 begin
   if FOwnsWriter then FWriter.Free;
   inherited Destroy;

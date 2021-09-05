@@ -8,37 +8,11 @@ unit stax.helpertypes;
 
 interface
 uses
-  SysUtils;
+  SysUtils, gvector;
 
 type
   ENoValueSetException = class(Exception);
   TNoneType = record
-  end;
-
-  { TOptional }
-
-  generic TOptional<T> = record
-  public type
-    PData = ^T;
-    TSpecializedOptional = specialize TOptional<T>;
-  private
-    FHasValue: Boolean;
-    FValue: T;
-
-    class operator Initialize(var opt: TSpecializedOptional);
-  public
-    function Mutable: PData;
-    function Value: T; {$IFDEF INLINING}inline;{$ENDIF}
-    function GetOrDefault(constref DefaultValue: T): T;{$IFDEF INLINING}inline;{$ENDIF}
-    function HasValue: Boolean; {$IFDEF INLINING}inline;{$ENDIF}
-
-    constructor Create(constref AValue: T);
-    class function Empty: TSpecializedOptional; static;
-
-    class operator :=(constref AValue: T): TSpecializedOptional; {$IFDEF INLINING}inline;{$ENDIF}
-    class operator :=(const None: TNoneType): TSpecializedOptional; {$IFDEF INLINING}inline;{$ENDIF}
-    class operator :=(constref AOpt: TSpecializedOptional): Boolean; {$IFDEF INLINING}inline;{$ENDIF}
-    class operator not(constref AOpt: TSpecializedOptional): Boolean; {$IFDEF INLINING}inline;{$ENDIF}
   end;
 
   TUnionType = (utNone, utFirst, utSecond);
@@ -93,22 +67,51 @@ type
     constructor Create(AFirst: TFirst; ASecond: TSecond);
   end;
 
-function EmptyOptional: TNoneType;
+  EIndexOutOfBoundException = class(Exception);
+
+  { TMinHeap }
+
+  generic TMinHeap<T, Comparator> = class
+  public type
+    PT = ^T;
+    TDataList = specialize TVector<T>;
+  private
+    FData: TDataList;
+    function IsLeaf(AIndex: SizeInt): Boolean; inline;
+    class function IsRoot(AIndex: SizeInt): Boolean; static; inline;
+    class function Parent(AIndex: SizeInt): SizeInt; static; inline;
+    class function LChild(AIndex: SizeInt): SizeInt; static; inline;
+    class function RChild(AIndex: SizeInt): SizeInt; static; inline;
+
+    procedure Swap(AIndex: SizeInt; BIndex: SizeInt);
+    procedure Heapify(AIndex: SizeInt);
+  public
+    constructor Create;
+    destructor Destroy; override;
+
+    function Insert(constref AElem: T): SizeInt;
+    procedure Delete(AIndex: SizeInt);
+    procedure Pop; inline;
+
+    function Empty: Boolean; inline;
+
+    function First: PT; inline;
+    function ExtractFirst: T;
+
+    property Elements: TDataList read FData;
+  end;
+
 function EmptyUnion: TNoneType;
 generic function Pair<TFirst, TSecond>(AFirst: TFirst; ASecond: TSecond): specialize TPair<TFirst, TSecond>;
 
 implementation
 
-{$Warnings OFF}function EmptyOptional: TNoneType;
-begin
-  //noop
-end;
-
+{$Push}{$Warnings OFF}
 function EmptyUnion: TNoneType;
 begin
   //noop
 end;
-{$Warnings ON}
+{$Pop}
 
 generic function Pair<TFirst, TSecond>(AFirst: TFirst; ASecond: TSecond): specialize TPair<TFirst, TSecond>;
 begin
@@ -263,69 +266,115 @@ begin
   result := not AOpt.HasValue;
 end;
 
-{ TOptional }
+{ TMinHeap }
 
-class operator TOptional.Initialize(var opt: TSpecializedOptional);
+function TMinHeap.IsLeaf(AIndex: SizeInt): Boolean;
 begin
-  opt.FHasValue := False;
-  opt.FValue := Default(T);
+  Result := AIndex >= (FData.Size div 2);
 end;
 
-function TOptional.Mutable: PData;
+class function TMinHeap.IsRoot(AIndex: SizeInt): Boolean;
 begin
-  if not FHasValue then
-    raise ENoValueSetException.Create('Trying to access an empty optional');
-  Result := @FValue;
+  Result := AIndex = 0;
 end;
 
-function TOptional.Value: T;
+class function TMinHeap.Parent(AIndex: SizeInt): SizeInt;
 begin
-  Result := Mutable^;
+  Result := (AIndex - 1) div 2;
 end;
 
-function TOptional.GetOrDefault(constref DefaultValue: T): T;
+class function TMinHeap.LChild(AIndex: SizeInt): SizeInt;
 begin
-  if FHasValue then
-    Result := FValue
-  else
-    Result := DefaultValue;
+  Result := AIndex * 2 + 1;
 end;
 
-function TOptional.HasValue: Boolean;
+class function TMinHeap.RChild(AIndex: SizeInt): SizeInt;
 begin
-  Result := FHasValue;
+  Result := AIndex * 2 + 2;
 end;
 
-constructor TOptional.Create(constref AValue: T);
+constructor TMinHeap.Create;
 begin
-  FHasValue := True;
-  FValue := AValue;
+  FData := TDataList.Create;
 end;
 
-class function TOptional.Empty: TSpecializedOptional;
+destructor TMinHeap.Destroy;
 begin
-  Result.FHasValue := False;
-  Result.FValue := Default(T);
+  FData.Free;
+  inherited Destroy;
 end;
 
-class operator TOptional.:=(constref AValue: T): TSpecializedOptional;
+procedure TMinHeap.Swap(AIndex: SizeInt; BIndex: SizeInt);
+var
+  tmp: T;
 begin
-  Result := TSpecializedOptional.Create(AValue);
+  // Use move to avoid overhead of managed types
+  Move(FData.Mutable[AIndex]^, tmp, SizeOf(T));
+  Move(FData.Mutable[BIndex]^, FData.Mutable[AIndex]^, SizeOf(T));
+  Move(tmp, FData.Mutable[BIndex]^, SizeOf(T));
 end;
 
-class operator TOptional.:=(const None: TNoneType): TSpecializedOptional;
+procedure TMinHeap.Heapify(AIndex: SizeInt);
+var
+  SwapChild: SizeInt;
 begin
-  Result := TSpecializedOptional.Empty;
+  // use pointer access so constref can be used in the comparator
+  while not IsLeaf(AIndex) do
+  begin
+    if Comparator.C(FData.Mutable[LChild(AIndex)]^, FData.Mutable[RChild(AIndex)]^) then
+      SwapChild := LChild(AIndex)
+    else
+      SwapChild := RChild(AIndex);
+    // if we reach the point where we are smaller than the smallest child
+    // we are finished
+    if Comparator.C(FData.Mutable[AIndex]^, FData.Mutable[SwapChild]^) then
+      Break;
+    // Otherwise swap with child
+    Swap(AIndex, SwapChild);
+    // and continue checking that new place
+    AIndex := SwapChild;
+  end;
 end;
 
-class operator TOptional.:=(constref AOpt: TSpecializedOptional): Boolean;
+function TMinHeap.Insert(constref AElem: T): SizeInt;
 begin
-  Result := AOpt.HasValue;
+  FData.PushBack(AElem);
+  Result := FData.Size - 1;
+  while (Result > 0) and Comparator.C(FData.Mutable[Result]^, FData.Mutable[Parent(Result)]^) do
+  begin
+    Swap(Result, Parent(Result));
+    Result := Parent(Result);
+  end;
 end;
 
-class operator TOptional.not(constref AOpt: TSpecializedOptional): Boolean;
+procedure TMinHeap.Delete(AIndex: SizeInt);
 begin
-  Result := not AOpt.FHasValue;
+  if (AIndex < 0) or (AIndex > FData.Size) then
+    raise EIndexOutOfBoundException.Create('Index out of bounds');
+  Swap(AIndex, FData.Size - 1);
+  FData.PopBack;
+  Heapify(AIndex);
+end;
+
+procedure TMinHeap.Pop;
+begin
+  Delete(0);
+end;
+
+function TMinHeap.Empty: Boolean;
+begin
+  Result := FData.Size = 0;
+end;
+
+function TMinHeap.First: PT;
+begin
+  Result := FData.Mutable[0];
+end;
+
+function TMinHeap.ExtractFirst: T;
+begin
+  Result := FData.Mutable[0]^;
+  Self.Delete(0);
 end;
 
 end.
