@@ -22,7 +22,7 @@ end;
 procedure YieldTask(AExecutor: TExecutor);
 begin
   WriteLn('Start Yield');
-  Yield;
+  AsyncSleep(0);
   WriteLn('Yielded');
 end;
 

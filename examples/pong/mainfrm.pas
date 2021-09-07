@@ -181,8 +181,8 @@ begin
     TCPServerListen(ServerSocket, 1);
     FSocket := specialize Await<TSocket>(AsyncAccept(ServerSocket));
     try
-      RunAsync(AsyncProcedure(@Self.GameLoop));
-      Await(AsyncProcedure(@Self.HandleConnection));
+      AwaitAll([AsyncProcedure(@Self.GameLoop),
+                AsyncProcedure(@Self.HandleConnection)], ebRaiseAndTerminate);
     finally
       TCPSocketClose(FSocket);
     end;

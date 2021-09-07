@@ -78,6 +78,7 @@ type
   private
     FData: TDataList;
     function IsLeaf(AIndex: SizeInt): Boolean; inline;
+    function HasRChild(AIndex: SizeInt): Boolean; inline;
     class function IsRoot(AIndex: SizeInt): Boolean; static; inline;
     class function Parent(AIndex: SizeInt): SizeInt; static; inline;
     class function LChild(AIndex: SizeInt): SizeInt; static; inline;
@@ -273,6 +274,11 @@ begin
   Result := AIndex >= (FData.Size div 2);
 end;
 
+function TMinHeap.HasRChild(AIndex: SizeInt): Boolean;
+begin
+  Result := AIndex * 2 + 2 < FData.Size;
+end;
+
 class function TMinHeap.IsRoot(AIndex: SizeInt): Boolean;
 begin
   Result := AIndex = 0;
@@ -321,7 +327,7 @@ begin
   // use pointer access so constref can be used in the comparator
   while not IsLeaf(AIndex) do
   begin
-    if Comparator.C(FData.Mutable[LChild(AIndex)]^, FData.Mutable[RChild(AIndex)]^) then
+    if not HasRChild(AIndex) or Comparator.C(FData.Mutable[LChild(AIndex)]^, FData.Mutable[RChild(AIndex)]^) then
       SwapChild := LChild(AIndex)
     else
       SwapChild := RChild(AIndex);
