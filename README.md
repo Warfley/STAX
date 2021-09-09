@@ -47,7 +47,7 @@ The result of `TRVTask<T>` has to be written into the field `FResult` which has 
 To ease implementation the unit `stax.functional` implements tasks that can be created from function pointers.
 At the moment it supports creating tasks from any function or procedure (both as simple function or as method/of object) with 0 to 4 parameter.
 Typing is handled via generics
-```
+```pascal
 procedure Foo(AExecutor: TExecutor; AString: String);
 function Bar(AExecutor: TExecutor; AInt: Integer): Double;
 ...
@@ -58,7 +58,7 @@ myFuncTask := AsyncFunction<Double, Integer>(@Bar, 42); // creates a task that w
 The scheduler is implemented in the `TExecutor` class.
 New Tasks can be scheduled to the `TExecutor` class via the `RunAsync` method.
 The scheduler will then work on the tasks in it's `Run` method, and will do so until no more `Tasks` are queued.
-```
+```pascal
 Executor := TExecutor.Create;
 Executor.RunAsync(AsyncProcedure(@Test)); // Initial task to run
 Executor.Run; // Run until all tasks are finished
@@ -82,7 +82,7 @@ In the case where there is always at least one active task, it will never go to 
 As there can only be one executor per thread, the executor of the current thread can be accessed via the global `GetExecutor` function.
 Also a global `AsyncSleep`, `Await` and `AwaitAll` function is provided, which will call the respective method for the executor of the current thread.
 `Await` can also be used to receive the result of an `TRVTask<T>`
-```
+```pascal
 function MyFunc(AExecutor: TExecutor): Integer;
 ...
 procedure MyTaskProcedure(AExecutor: TExecutor);
@@ -98,7 +98,7 @@ When a `Task` raises an exception which is not handled within the task, it is st
 STAX provides two standard ways to deal with such exceptions that can be configured when scheduling the task.
 First there is the `OnError` event of the `TExecutor`, which can be called if a `TTask` finished with an unhandled exception.
 The second way is to raise that exception to the `Task` that awaits the failing task:
-```
+```pascal
 try
   Await(PossiblyFailingTask);
 on E: Exception do
@@ -120,6 +120,66 @@ A terminated task also has some restrictions.
 It cannot yield to the scheduler, sleep or await other tasks.
 Basically once terminated it must finish in the same scheduling cycle.
 This ensures a timely termination after the call of `Terminate`.
+
+
+## GUI Applications
+STAX can be used within GUI applications. While there is no direct integration into the LCL it can be hacked together:
+1. Add an Executor variable to your form
+```pascal
+TForm1 = class(TForm)
+[...]
+private
+  FExecutor: TExecutor;
+```
+2. Add a global function like this:
+```pascal
+procedure ProcessMessages(AExecutor: TExecutor);
+begin
+  AExecutor.Sleep(10);
+  AExecutor.RunAsync(AsyncProcedure(@ProcessMessages));
+  Application.ProcessMessages;
+end;
+```
+3. Add a timer (e.g. with the name StaxStartTimer) with a very small interval (0-10) with enabled to true. In that timers event create the executor and let it run with the ProcessMessages function:
+```pascal
+procedure TForm1.StaxStartTimerTimer(Sender: TObject);
+begin
+  StaxStartTimer.Enabled := False;
+  if Assigned(FExecutor) then
+    Exit;
+  FExecutor := TExecutor.Create;
+  try
+    FExecutor.OnError := @Self.HandleTaskError;
+    FExecutor.RunAsync(AsyncProcedure(@ProcessMessages));
+    FExecutor.Run;
+  finally
+    FExecutor.Free;
+  end;
+end;
+```
+4. Add an `OnClose` event to the form that terminates the Executor:
+```pascal
+procedure TForm1.Form1Close(Sender: TObject);
+begin
+  if Assigned(FExecutor) then
+    FExecutor.Terminate;
+end;
+```
+
+### Explanation:
+The `ProcessMessages` function will take over as the main message loop of  the LCL.
+It will reschedule iteself before actually calling `Application.ProcessMessages`.
+The reason for this is that now tasks can yield during event handlers, and while they are yielded, the event loop can start again and start serving the next event.
+This way you can use `AsyncSleep` and `Await` within event handlers without having to worry about freezing your application.
+The `Sleep` inside is to not have the application loop alone utilizing all of the CPU power which would result in having the application taking 100% CPU usage.
+
+The timer is required to start the STAX event loop, any earlier events like `OnCreate` or `OnActivate` need to return, otherwise the application will freeze.
+It is very important to set an error handler, otherwise a single uncaught exception will kill the whole STAX loop
+
+The `OnClose` event is fired when the user requests closing of the form, but because we have still the `Executor` running the LCL can't finish the application.
+So to be able to close the form and stop the application, we need to tell the `Executor` to stop by calling it's `Terminate` function.
+
+An example for this can be seen in the `pong` example, which integrates STAX into the LCL to create a multiplayer game of pong, where LCL controls are used for displaying the game and catching user input, while communicating with the other player via the stax `asynctcp` unit.
 
 ## Examples
 The examples directory contains a few small examples.

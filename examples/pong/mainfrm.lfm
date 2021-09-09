@@ -10,7 +10,6 @@ object Form1: TForm1
   OnClose = FormClose
   OnKeyDown = FormKeyDown
   OnKeyUp = FormKeyUp
-  LCLVersion = '2.0.12.0'
   object PlayerPanel: TShape
     Left = 974
     Height = 144
@@ -59,5 +58,11 @@ object Form1: TForm1
     Width = 144
     TabOrder = 2
     Text = '127.0.0.1'
+  end
+  object STAXStartTimer: TTimer
+    Interval = 10
+    OnTimer = STAXStartTimerTimer
+    Left = 224
+    Top = 568
   end
 end

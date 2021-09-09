@@ -35,11 +35,13 @@ type
     OpponentPanel: TShape;
     Ball: TShape;
     StartClientButton: TButton;
+    STAXStartTimer: TTimer;
     procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure FormKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure StartClientButtonClick(Sender: TObject);
     procedure StartServerButtonClick(Sender: TObject);
+    procedure STAXStartTimerTimer(Sender: TObject);
   private
     FExecutor: TExecutor;
     FGameState: TGameState;
@@ -80,6 +82,22 @@ procedure TForm1.StartServerButtonClick(Sender: TObject);
 begin
   FIsServer := True;
   StartGame;
+end;
+
+procedure TForm1.STAXStartTimerTimer(Sender: TObject);
+begin
+  STAXStartTimer.Enabled:=False;
+  if Assigned(FExecutor) then
+    Exit;
+  FGameState := NewGameState;
+  FExecutor := TExecutor.Create;
+  try
+    FExecutor.OnError := @Self.HandleTaskError;
+    FExecutor.RunAsync(AsyncProcedure(@RenderGame));
+    FExecutor.Run;
+  finally
+    FExecutor.Free;
+  end;
 end;
 
 procedure TForm1.StartClientButtonClick(Sender: TObject);
@@ -214,18 +232,10 @@ begin
   StartClientButton.Hide;
   HostEdit.Hide;
   FGameState := NewGameState;
-  FExecutor := TExecutor.Create;
-  try
-    FExecutor.OnError := @Self.HandleTaskError;
-    FExecutor.RunAsync(AsyncProcedure(@RenderGame));
-    if FIsServer then
-      FExecutor.RunAsync(AsyncProcedure(@Self.StartServer))
-    else
-      FExecutor.RunAsync(AsyncProcedure(@Self.StartClient));
-    FExecutor.Run;
-  finally
-    FExecutor.Free;
-  end;
+  if FIsServer then
+    FExecutor.RunAsync(AsyncProcedure(@Self.StartServer))
+  else
+    FExecutor.RunAsync(AsyncProcedure(@Self.StartClient));
 end;
 
 procedure TForm1.RenderGame(AExecutor: TExecutor);
