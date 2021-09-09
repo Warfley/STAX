@@ -65,19 +65,22 @@ Executor.Run; // Run until all tasks are finished
 Executor.Free;
 ```
 
-### Yield, Await and Sleep
-Tasks can yield to the executor by calling the `Yield` method of either themselves or of the executor.
-If the task wants to sleep for a certain amount of time, it provides the `Sleep` method.
+### Await and Sleep
+Tasks can yield to the scheduler by calling their `Sleep` method.
+There they can specify on how long the scheduler should wait at least before rescheduling them.
+A `Sleep(0)` will yield to the scheduler but immediately reschedule the current task, so while giving other tasks a chance to be executed, if no other tasks are available will be continued directly.
 To schedule another task and wait for it to finish, they can make use of the `Await` method.
 Tasks can also be scheduled with `ScheduleForAwait` and be awaited afterwards.
 To await multiple Tasks the `AwaitAll` method can be used.
 It can be configured to either ignore exceptions, terminate all Tasks once the first exception was raised, or accumulate exceptions and raise them after all tasks finished or raised an exception.
 
+The Await method also takes a `TimeOut` argument, which will terminate the task if it takes to long to complete. In that case an exception is raised to notify the user.
+
 If all active tasks are awaiting or sleeping, the scheduler will call the the systems `Sleep` function to get load of the CPU.
 In the case where there is always at least one active task, it will never go to sleep and easily reach 100% CPU load.
 
 As there can only be one executor per thread, the executor of the current thread can be accessed via the global `GetExecutor` function.
-Also a global `Yield`, `AsyncSleep`, `Await` and `AwaitAll` function is provided, which will call the respective method for the executor of the current thread.
+Also a global `AsyncSleep`, `Await` and `AwaitAll` function is provided, which will call the respective method for the executor of the current thread.
 `Await` can also be used to receive the result of an `TRVTask<T>`
 ```
 function MyFunc(AExecutor: TExecutor): Integer;
@@ -125,4 +128,5 @@ The examples directory contains a few small examples.
 * `tcpexample` implements a simple tcp echo server and tcp client, which runs completely single threaded and can handle multiple connections simultaniously
 * `stoptest` shows how to stop running tasks
 * `awaitalltest` shows the usage of the `AwaitAll` function  with respect to exceptions
+* `timeout` contains an example for using timeouts with `Await`
 * `pong` provides a simple two player pong game via TCP, which incorporates STAX into LCL GUI applications
