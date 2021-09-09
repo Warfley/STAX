@@ -35,6 +35,7 @@ type
     OpponentPanel: TShape;
     Ball: TShape;
     StartClientButton: TButton;
+    procedure FormClose(Sender: TObject; var CloseAction: TCloseAction);
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure FormKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure StartClientButtonClick(Sender: TObject);
@@ -102,6 +103,11 @@ begin
     FGameState.Player1Movement := NewMovement
   else
     Await(specialize AsyncSend<TPlayerMovement>(FSocket, NewMovement));
+end;
+
+procedure TForm1.FormClose(Sender: TObject; var CloseAction: TCloseAction);
+begin
+  FExecutor.Terminate;
 end;
 
 procedure TForm1.FormKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);

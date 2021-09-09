@@ -209,9 +209,6 @@ type
     procedure ExecutionLoop;
     procedure TeardownExecution;
 
-    // termination
-    procedure TerminateTaskAndFinish(AExecution: TExecutable); {$IfDef inlining}inline;{$endif}
-    procedure StopRemainingExecutions;
   public
     constructor Create;
     destructor Destroy; override;
@@ -679,11 +676,9 @@ end;
 var
   AError: EMultiTaskException;
   TaskTerminated: ETaskTerminatedException;
-  TimeOutEncountered: Boolean;
   EndTime, CurrTime: QWord;
 begin
   TaskTerminated := nil;
-  TimeOutEncountered := False;
   EndTime := GetTickCount64 + TimeOut;
   CheckAssumptions;
   // If already one task raised an exception
@@ -888,7 +883,7 @@ var
 begin
   Result := MaxWaitingTime;
   CurrTime := GetTickCount64;
-  while not FSleepQueue.Empty and (FSleepQueue.First^.First < CurrTime) do
+  while not FSleepQueue.Empty and (FTerminated or (FSleepQueue.First^.First < CurrTime)) do
     ScheduleForExecution(FSleepQueue.ExtractFirst.Second);
   if not FSleepQueue.Empty then
     Result := Min(FSleepQueue.First^.First - CurrTime, MaxWaitingTime);
@@ -926,7 +921,7 @@ var
   NextExecution: TExecutable;
   SleepTime: QWord;
 begin
-  while not FTerminated and ((FSchedulingQueue.Count > 0) or not FSleepQueue.Empty or TasksWaiting) do
+  while (FSchedulingQueue.Count > 0) or not FSleepQueue.Empty or TasksWaiting do
   begin
     SleepTime := HandleSleepQueue;
     if FSchedulingQueue.Count = 0 then
@@ -935,6 +930,8 @@ begin
     else
     begin
       NextExecution := FSchedulingQueue.Extract;
+      if FTerminated then
+        NextExecution.Terminate;
       ContinueExecutable(NextExecution);
       // if task finished, call the finish within the executors stack
       if NextExecution.Status >= esFinished then
@@ -945,52 +942,10 @@ end;
 
 procedure TExecutor.TeardownExecution;
 begin
-  StopRemainingExecutions;
   if TasksWaiting then
     raise ESomethingWentHorriblyWrongException.Create('Stopped execution while some tasks still waiting... This should never happen');
   FreeAndNil(FFiber);
   CurrentExecutor := nil;
-end;
-
-procedure TExecutor.TerminateTaskAndFinish(AExecution: TExecutable);
-begin
-  // Only call this on tasks waiting or scheduled
-  AExecution.Terminate;
-  FFiber.SwitchTo(AExecution.FFiber);
-end;
-
-procedure TExecutor.StopRemainingExecutions;
-var
-  AExecution: TExecutable;
-begin
-  // wakeup all sleeping tasks
-  while not FSleepQueue.Empty do
-    ScheduleForExecution(FSleepQueue.ExtractFirst.Second);
-  // stop all scheduled tasks
-  while FSchedulingQueue.Count > 0 do
-  begin
-    AExecution := FSchedulingQueue.Extract;
-    if AExecution.FStatus = esScheduled then
-    begin
-      // not started yet, simply kill it off:
-      // first set the error
-      AExecution.FError := ETaskTerminatedException.Create('Task terminated by executor');
-      AExecution.FStatus := esError;
-      // Finalize execution
-      AExecution.FinalizeExecution;
-    end
-    else if AExecution.FStatus = esRescheduled then
-    begin
-      // task is yielded, set the terminated flag and continue to let it raise an exception
-      TerminateTaskAndFinish(AExecution);
-      if AExecution.Status < esFinished then
-        raise ESomethingWentHorriblyWrongException.Create('Execution didn''t finish when it should');
-      // finalize task
-      AExecution.FinalizeExecution;
-    end
-    else
-      raise ESomethingWentHorriblyWrongException.Create('Only scheduled and rescheduled tasks should be in queue');
-  end;
 end;
 
 constructor TExecutor.Create;

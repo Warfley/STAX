@@ -7,6 +7,7 @@ object Form1: TForm1
   ClientHeight = 781
   ClientWidth = 1000
   DesignTimePPI = 144
+  OnClose = FormClose
   OnKeyDown = FormKeyDown
   OnKeyUp = FormKeyUp
   LCLVersion = '2.0.12.0'
