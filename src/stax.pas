@@ -20,6 +20,7 @@ type
   // Exceptions
   ETaskTerminatedException = class(Exception);
   EAwaitedTaskTerminatedException = class(Exception);
+  EAwaitTimeoutException = class(Exception);
   ETaskAlreadyTerminatedException = class(Exception);
   ETaskNotActiveException = class(Exception);
   EForeignTaskException = class(Exception);
@@ -48,6 +49,7 @@ type
     FExceptions: TTaskExceptionMap;
     FOwnsTasks: Boolean;
   public
+    constructor Create(OwnsTasks: Boolean);
     constructor Create(ATask: TTask; AException: Exception; OwnsTasks: Boolean);
     destructor Destroy; override;
 
@@ -91,18 +93,17 @@ type
     FFiber: TFiber;
     FNumDependencies: Integer;
   public
+    // Dependency management
     function HasDependencies: Boolean; inline;
+    procedure DependencyResolved(ADependency: TDependable); {$IFDEF inlining}inline;{$ENDIF}
+    procedure AddDependency(ADependency: TDependable); {$IFDEF inlining}inline;{$ENDIF}
   private
     // Scheduling
     procedure SetExecutor(AExecutor: TExecutor); {$IFDEF inlining}inline;{$ENDIF}
     procedure MarkScheduled;
     procedure YieldToScheduler; {$IFDEF inlining}inline;{$ENDIF}
     procedure Wait; {$IFDEF inlining}inline;{$ENDIF}
-
-    // Dependency management
-    procedure DependencyResolved(ADependency: TDependable); {$IFDEF inlining}inline;{$ENDIF}
-    procedure AddDependency(ADependency: TDependable); {$IFDEF inlining}inline;{$ENDIF}
-
+  protected
     // Execution
     procedure DoExecute;
   protected
@@ -157,9 +158,9 @@ type
 
   TExecutableHelper = class helper for TExecutable
   public
-    procedure Await(ATask: TTask; FreeTask: Boolean = True); overload;
-    generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload;
-    procedure AwaitAll(const Tasks: Array of TTask; ExceptionBehavior: TExceptionBehavior = ebAccumulate; FreeTasks: Boolean = True);
+    procedure Await(ATask: TTask; TimeOut: Int64 = -1; FreeTask: Boolean = True); overload;
+    generic function Await<TResult>(ATask: specialize TRVTask<TResult>; TimeOut: Int64 = -1; FreeTask: Boolean = True): TResult; overload;
+    procedure AwaitAll(const Tasks: Array of TTask; ExceptionBehavior: TExceptionBehavior = ebAccumulate; TimeOut: Int64 = -1; FreeTasks: Boolean = True);
   end;
 
   { TExecutor }
@@ -195,7 +196,7 @@ type
 
     // Sleeping
     procedure QueueSleep(ATask: TExecutable; ATime: QWord); {$IFDEF inlining}inline;{$ENDIF}
-    procedure RemoveSleeping(AExecutable: TExecutable);
+    procedure Wakeup(AExecutable: TExecutable);
     function HandleSleepQueue: QWord;
 
     // Waiting
@@ -234,9 +235,9 @@ type
 
   TExecutorHelper = class helper for TExecutor
   public
-    procedure Await(ATask: TTask; FreeTask: Boolean = True); overload; {$IFDEF inlining}inline;{$ENDIF}
-    generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload; {$IFDEF inlining}inline;{$ENDIF}
-    procedure AwaitAll(const Tasks: Array of TTask; ExceptionBehavior: TExceptionBehavior = ebAccumulate; FreeTasks: Boolean = True);
+    procedure Await(ATask: TTask; TimeOut: Int64 = -1; FreeTask: Boolean = True); overload; {$IFDEF inlining}inline;{$ENDIF}
+    generic function Await<TResult>(ATask: specialize TRVTask<TResult>; TimeOut: Int64 = -1; FreeTask: Boolean = True): TResult; overload; {$IFDEF inlining}inline;{$ENDIF}
+    procedure AwaitAll(const Tasks: Array of TTask; ExceptionBehavior: TExceptionBehavior = ebAccumulate; TimeOut: Int64 = -1; FreeTasks: Boolean = True);
   end;
 
   { TExecutionWorkFiber }
@@ -256,9 +257,9 @@ function GetExecutor: TExecutor; {$IFDEF inlining}inline;{$ENDIF}
 function GetCurrentExecution: TExecutable; {$IFDEF inlining}inline;{$ENDIF}
 function RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True): TTask; {$IFDEF inlining}inline;{$ENDIF}
 function ScheduleForAwait(ATask: TTask): TTask; {$IFDEF inlining}inline;{$ENDIF}
-procedure Await(ATask: TTask; FreeTask: Boolean = True); overload; {$IFDEF inlining}inline;{$ENDIF}
-generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult; overload; {$IFDEF inlining}inline;{$ENDIF}
-procedure AwaitAll(const Tasks: array of TTask; ExceptionBehavior: TExceptionBehavior = ebAccumulate; FreeTasks: Boolean = True); {$IFDEF inlining}inline;{$ENDIF}
+procedure Await(ATask: TTask; TimeOut: Int64 = -1; FreeTask: Boolean = True); overload; {$IFDEF inlining}inline;{$ENDIF}
+generic function Await<TResult>(ATask: specialize TRVTask<TResult>; TimeOut: Int64 = -1; FreeTask: Boolean = True): TResult; overload; {$IFDEF inlining}inline;{$ENDIF}
+procedure AwaitAll(const Tasks: array of TTask; ExceptionBehavior: TExceptionBehavior = ebAccumulate; TimeOut: Int64 = -1; FreeTasks: Boolean = True); {$IFDEF inlining}inline;{$ENDIF}
 procedure AsyncSleep(time: QWord); {$IFDEF inlining}inline;{$ENDIF}
 
 implementation
@@ -290,13 +291,18 @@ end;
 
 { EMultiTaskException }
 
-constructor EMultiTaskException.Create(ATask: TTask; AException: Exception;
-  OwnsTasks: Boolean);
+constructor EMultiTaskException.Create(OwnsTasks: Boolean);
 begin
   inherited Create('One or more tasks threw an exception');
   FExceptions := TTaskExceptionMap.Create;
-  FExceptions.Add(ATask, AException);
   FOwnsTasks := OwnsTasks;
+end;
+
+constructor EMultiTaskException.Create(ATask: TTask; AException: Exception;
+  OwnsTasks: Boolean);
+begin
+  Create(OwnsTasks);
+  FExceptions.Add(ATask, AException);
 end;
 
 destructor EMultiTaskException.Destroy;
@@ -376,6 +382,20 @@ begin
   Result := FNumDependencies > 0;
 end;
 
+procedure TExecutable.DependencyResolved(ADependency: TDependable);
+begin
+  if FNumDependencies <= 0 then
+    raise ESomethingWentHorriblyWrongException.Create('No dependencies left');
+  Dec(FNumDependencies);
+  FExecutor.ScheduleForExecution(Self);
+end;
+
+procedure TExecutable.AddDependency(ADependency: TDependable);
+begin
+  Inc(FNumDependencies);
+  ADependency.AddDepending(Self);
+end;
+
 procedure TExecutable.SetExecutor(AExecutor: TExecutor);
 begin
   if Assigned(FExecutor) then
@@ -410,20 +430,6 @@ begin
   FExecutor.AddWaitingTask(Self);
   FStatus := esWaiting;
   YieldToScheduler;
-end;
-
-procedure TExecutable.DependencyResolved(ADependency: TDependable);
-begin
-  if FNumDependencies <= 0 then
-    raise ESomethingWentHorriblyWrongException.Create('No dependencies left');
-  Dec(FNumDependencies);
-  FExecutor.ScheduleForExecution(Self);
-end;
-
-procedure TExecutable.AddDependency(ADependency: TDependable);
-begin
-  Inc(FNumDependencies);
-  ADependency.AddDepending(Self);
 end;
 
 procedure TExecutable.DoExecute;
@@ -466,12 +472,17 @@ begin
   inherited Destroy;
 end;
 
-procedure TExecutableHelper.Await(ATask: TTask; FreeTask: Boolean);
+procedure TExecutableHelper.Await(ATask: TTask; TimeOut: Int64;
+  FreeTask: Boolean);
 var
+  EndTime, CurrTime: QWord;
   Err: Exception;
+  TimeoutEncountered: Boolean;
   TaskTerminated: ETaskTerminatedException;
 begin
+  EndTime := GetTickCount64 + TimeOut;
   TaskTerminated := nil;
+  TimeoutEncountered := False;
   try
     if FExecutor.FCurrentExecution <> Self then
       raise ETaskNotActiveException.Create('Only an active task can await');
@@ -491,16 +502,31 @@ begin
       // if we are woken up due to a terminate, we need to still wait for the other task to perform memory management
       while ATask.Status < esFinished do
         try
-          Wait;
+          // We simply wait to be woken up if either the task has already been terminated
+          // and we wait for it to finish up, or if we don't have a timeout and wait for it
+          // to run
+          if (ATask.Terminated) or (TimeOut < 0) then
+            Wait
+          else
+          begin // timeout set: check if we surpassed timeout
+            CurrTime := GetTickCount64;
+            if CurrTime <= EndTime then // if we have time left
+              Self.Sleep(EndTime - CurrTime) // Sleep until woken up or timeout
+            else // otherwise terminate task
+            begin
+              TimeoutEncountered := True;
+              ATask.Terminate;
+            end;
+          end;
         except on E: ETaskTerminatedException do
           if not Assigned(TaskTerminated) then
           begin
-          // so we can wait agian
-          FTerminated := False;
-          // remember to re-raise
-          TaskTerminated := ETaskTerminatedException(AcquireExceptionObject);
-          // Terminate task we are awaiting
-          ATask.Terminate;
+            // so we can wait agian
+            FTerminated := False;
+            // remember to re-raise
+            TaskTerminated := ETaskTerminatedException(AcquireExceptionObject);
+            // Terminate task we are awaiting
+            ATask.Terminate;
           end;
         end;
     end;
@@ -510,7 +536,10 @@ begin
       FTerminated := True;
       raise TaskTerminated;
     end;
-    // Check for errors
+    // If timeout raise error
+    if TimeoutEncountered then
+      raise EAwaitTimeoutException.Create('Task timed out during await');
+    // Error handling
     if ATask.Status = esError then
     begin
       Err := ATask.ExtractError;
@@ -528,10 +557,10 @@ begin
   end;
 end;
 
-generic function TExecutableHelper.Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
+generic function TExecutableHelper.Await<TResult>(ATask: specialize TRVTask<TResult>; TimeOut: Int64 = -1; FreeTask: Boolean = True): TResult;
 begin
   try
-    Self.Await(ATask, False);
+    Self.Await(ATask, TimeOut, False);
     Result := ATask.TaskResult;
   finally
     if FreeTask then
@@ -540,7 +569,7 @@ begin
 end;
 
 procedure TExecutableHelper.AwaitAll(const Tasks: array of TTask;
-  ExceptionBehavior: TExceptionBehavior; FreeTasks: Boolean);
+  ExceptionBehavior: TExceptionBehavior; TimeOut: Int64; FreeTasks: Boolean);
 
 procedure FreeAllTasks;
 var
@@ -619,6 +648,24 @@ begin
       Tasks[i].Terminate;
 end;
 
+// terminate all still active tasks and add them to timeout exception
+function TerminateTasksAndCreateTimeoutException: EMultiTaskException;
+var
+  i: Integer;
+begin
+  Result := EMultiTaskException.Create(FreeTasks);
+  for i:=Low(Tasks) to High(Tasks) do
+    if (ExceptionBehavior = ebAccumulate) and (Tasks[i].Status = esError) then
+      Result.AddException(Tasks[i], Tasks[i].ExtractError)
+    else if Tasks[i].Status < esFinished then
+    begin
+      Tasks[i].Terminate;
+      Result.AddException(Tasks[i], EAwaitTimeoutException.Create('Task timed out during await'));
+    end;
+  if Result.FExceptions.Count = 0 then
+    FreeAndNil(Result);
+end;
+
 // Free all tasks not referenced by the exception
 procedure FreeNonExceptionTasks(NotInclude: EMultiTaskException);
 var
@@ -632,9 +679,13 @@ end;
 var
   AError: EMultiTaskException;
   TaskTerminated: ETaskTerminatedException;
+  TimeOutEncountered: Boolean;
+  EndTime, CurrTime: QWord;
 begin
   TaskTerminated := nil;
-  CheckAssumptions; 
+  TimeOutEncountered := False;
+  EndTime := GetTickCount64 + TimeOut;
+  CheckAssumptions;
   // If already one task raised an exception
   // we might not need to start working in the first place
   AError := nil;
@@ -642,6 +693,10 @@ begin
     ScheduleTasks;
     while HasDependencies do
     begin
+      // check for timeout
+      CurrTime := GetTickCount64;
+      if (TimeOut >= 0) and (CurrTime > EndTime) then // timeout encountered, terminate tasks
+        AError := TerminateTasksAndCreateTimeoutException;
       // check for an exception but only if this is the first we find
       // all others would be termination exceptions, we therefore only do that once
       if (ExceptionBehavior = ebRaiseAndTerminate) and not Assigned(AError) then
@@ -653,7 +708,12 @@ begin
       end;
       // Wait until we are woken up by one of the tasks finishing or by termination
       try
-        Wait;
+        // We wait if we got terminated or we reached exception/timeout and wait for terminated tasks to finish
+        // or we have no timeout set
+        if Assigned(TaskTerminated) or Assigned(AError) or (TimeOut < 0) then
+          Wait
+        else // Timeout set: sleep to timeout or be woken up before
+          Self.Sleep(EndTime - CurrTime);
       except on E: ETaskTerminatedException do
         if not Assigned(TaskTerminated) then
         begin
@@ -678,18 +738,23 @@ begin
     // if we accumulate errors, we do so at the end
     // also if we want to report the first error but haven't found one yet,
     // check for errors during the last wait
-    if (ExceptionBehavior = ebAccumulate) or
-       ((ExceptionBehavior = ebRaiseAndTerminate) and not Assigned(AError)) then
+    if not Assigned(AError) and
+       ((ExceptionBehavior = ebAccumulate) or
+       (ExceptionBehavior = ebRaiseAndTerminate)) then
        AError := GetMultiException;
+
+    // If we encountered an error during execution, raise it now
+    if Assigned(AError) then
+      if ExceptionBehavior = ebIgnore then // unless we ignore all errors
+        AError.Free
+      else
+        raise AError;
   finally
     if FreeTasks then
       if not Assigned(AError) then
         FreeAllTasks
       else
         FreeNonExceptionTasks(AError);
-    // If we encountered an error during execution, raise it now
-    if Assigned(AError) then
-      raise AError;
   end;
 end;
 
@@ -720,9 +785,7 @@ begin
   // Set terminated
   FTerminated := True;
   // Wake up if sleeping or waiting
-  if FStatus = esSleeping then
-    FExecutor.RemoveSleeping(Self);
-  FExecutor.ScheduleForExecution(Self);
+  FExecutor.Wakeup(Self);
 end;
 
 { TRVTask }
@@ -803,16 +866,20 @@ begin
   FSleepQueue.Insert(specialize Pair<QWord, TExecutable>(EndTime, ATask));
 end;
 
-procedure TExecutor.RemoveSleeping(AExecutable: TExecutable);
+procedure TExecutor.Wakeup(AExecutable: TExecutable);
 var
   i: SizeInt;
 begin
-  for i := 0 to SizeInt(FSleepQueue.Elements.Size) - 1 do
-    if FSleepQueue.Elements.Mutable[i]^.Second = AExecutable then
-    begin
-      FSleepQueue.Delete(i);
-      Break;
-    end;
+  if not (AExecutable.Status in [esSleeping, esWaiting]) then
+    Exit;
+  if AExecutable.Status = esSleeping then
+    for i := 0 to SizeInt(FSleepQueue.Elements.Size) - 1 do
+      if FSleepQueue.Elements.Mutable[i]^.Second = AExecutable then
+      begin
+        FSleepQueue.Delete(i);
+        Break;
+      end;
+  ScheduleForExecution(AExecutable);
 end;
 
 function TExecutor.HandleSleepQueue: QWord;
@@ -954,26 +1021,27 @@ begin
   Result := RunAsync(ATask, False, False);
 end;
 
-procedure TExecutorHelper.Await(ATask: TTask; FreeTask: Boolean);
+procedure TExecutorHelper.Await(ATask: TTask; TimeOut: Int64; FreeTask: Boolean
+  );
 begin
   if (GetExecutor <> Self) or not Assigned(FCurrentExecution) then
     raise ENotATaskException.Create('Can only await inside a task');
-  FCurrentExecution.Await(ATask, FreeTask);
+  FCurrentExecution.Await(ATask, TimeOut, FreeTask);
 end;
 
-generic function TExecutorHelper.Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
+generic function TExecutorHelper.Await<TResult>(ATask: specialize TRVTask<TResult>; TimeOut: Int64 = -1; FreeTask: Boolean = True): TResult;
 begin
   if (GetExecutor <> Self) or not Assigned(FCurrentExecution) then
     raise ENotATaskException.Create('Can only await inside a task');
-  Result := FCurrentExecution.specialize Await<TResult>(ATask, FreeTask);
+  Result := FCurrentExecution.specialize Await<TResult>(ATask, TimeOut, FreeTask);
 end;
 
 procedure TExecutorHelper.AwaitAll(const Tasks: array of TTask;
-  ExceptionBehavior: TExceptionBehavior; FreeTasks: Boolean);
+  ExceptionBehavior: TExceptionBehavior; TimeOut: Int64; FreeTasks: Boolean);
 begin
   if (GetExecutor <> Self) or not Assigned(FCurrentExecution) then
     raise ENotATaskException.Create('Can only await inside a task');
-  FCurrentExecution.AwaitAll(Tasks, ExceptionBehavior, FreeTasks);
+  FCurrentExecution.AwaitAll(Tasks, ExceptionBehavior, TimeOut, FreeTasks);
 end;
 
 procedure TExecutor.Sleep(time: QWord);
@@ -1034,35 +1102,35 @@ begin
   Result := Executor.ScheduleForAwait(ATask);
 end;
 
-procedure Await(ATask: TTask; FreeTask: Boolean);
+procedure Await(ATask: TTask; TimeOut: Int64; FreeTask: Boolean);
 var
   Executor: TExecutor;
 begin
   Executor := GetExecutor;
   if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
     raise ENotATaskException.Create('Await can only be called from within a Task');
-  Executor.CurrentTask.Await(ATask, FreeTask);
+  Executor.CurrentTask.Await(ATask, TimeOut, FreeTask);
 end;
 
-generic function Await<TResult>(ATask: specialize TRVTask<TResult>; FreeTask: Boolean = True): TResult;
+generic function Await<TResult>(ATask: specialize TRVTask<TResult>; TimeOut: Int64 = -1; FreeTask: Boolean = True): TResult;
 var
   Executor: TExecutor;
 begin
   Executor := GetExecutor;
   if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
     raise ENotATaskException.Create('Await can only be called from within a Task');
-  Result := Executor.CurrentTask.specialize Await<TResult>(ATask, FreeTask);
+  Result := Executor.CurrentTask.specialize Await<TResult>(ATask, TimeOut, FreeTask);
 end;
 
 procedure AwaitAll(const Tasks: array of TTask;
-  ExceptionBehavior: TExceptionBehavior; FreeTasks: Boolean);
+  ExceptionBehavior: TExceptionBehavior; TimeOut: Int64; FreeTasks: Boolean);
 var
   Executor: TExecutor;
 begin
   Executor := GetExecutor;
   if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
     raise ENotATaskException.Create('Await can only be called from within a Task');
-  Executor.CurrentTask.AwaitAll(Tasks, ExceptionBehavior, FreeTasks);
+  Executor.CurrentTask.AwaitAll(Tasks, ExceptionBehavior, TimeOut, FreeTasks);
 end;
 
 procedure AsyncSleep(time: QWord);

@@ -59,6 +59,17 @@ begin
     AsyncProcedure(@SleepAndExceptionThrowingTask),
     AsyncProcedure(@CountingTask)
   ], ebIgnore);
+  WriteLn('Timeout');
+  try
+    AwaitAll([
+      AsyncProcedure(@ExceptionThrowingTask),
+      AsyncProcedure(@SleepAndExceptionThrowingTask),
+      AsyncProcedure(@CountingTask)
+    ], ebAccumulate, 500);
+  except on E: EMultiTaskException do
+    for Ex in E.Exceptions.Values do
+      WriteLn(Ex.Message);
+  end;
 end;
 
 var
