@@ -21,11 +21,11 @@ type
   ETaskTerminatedException = class(Exception);
   EAwaitedTaskTerminatedException = class(Exception);
   EAwaitTimeoutException = class(Exception);
-  ETaskAlreadyTerminatedException = class(Exception);
-  ETaskNotActiveException = class(Exception);
+  EExecutionAlreadyTerminatedException = class(Exception);
+  EExecutionNotActiveException = class(Exception);
   EForeignTaskException = class(Exception);
   EAlreadyAssignedExecutorException = class(Exception);
-  ENotATaskException = class(Exception);
+  ENotAnExecutionException = class(Exception);
   ESomethingWentHorriblyWrongException = class(Exception);
   EAlreadyOneExecutorActiveException = class(Exception);
 
@@ -384,7 +384,7 @@ begin
   if FNumDependencies <= 0 then
     raise ESomethingWentHorriblyWrongException.Create('No dependencies left');
   Dec(FNumDependencies);
-  FExecutor.ScheduleForExecution(Self);
+  FExecutor.Wakeup(Self);
 end;
 
 procedure TExecutable.AddDependency(ADependency: TDependable);
@@ -482,9 +482,9 @@ begin
   TimeoutEncountered := False;
   try
     if FExecutor.FCurrentExecution <> Self then
-      raise ETaskNotActiveException.Create('Only an active task can await');
+      raise EExecutionNotActiveException.Create('Only an active task can await');
     if FTerminated then
-      raise  ETaskAlreadyTerminatedException.Create('Can''t await in an already terminated task. Just finish up!');
+      raise  EExecutionAlreadyTerminatedException.Create('Can''t await in an already terminated task. Just finish up!');
     // SetSchedulingParameter task to await
     if ATask.Status = esNone then
       ScheduleForAwait(ATask)
@@ -585,13 +585,13 @@ begin
   if FExecutor.FCurrentExecution <> Self then
   begin
     if FreeTasks then FreeAllTasks;
-    raise ETaskNotActiveException.Create('Only an active task can await');
+    raise EExecutionNotActiveException.Create('Only an active task can await');
   end;
   // check if we are alive
   if FTerminated then
   begin
     if FreeTasks then FreeAllTasks;
-    raise ETaskAlreadyTerminatedException.Create('Can''t await in an already terminated task. Just finish up!');
+    raise EExecutionAlreadyTerminatedException.Create('Can''t await in an already terminated task. Just finish up!');
   end;
   // check all tasks if we can await all of them
   for i:=Low(Tasks) to High(Tasks) do
@@ -756,9 +756,9 @@ end;
 procedure TExecutable.Sleep(Time: QWord);
 begin
   if FExecutor.FCurrentExecution <> Self then
-    raise ETaskNotActiveException.Create('Only an active task can go to sleep');
+    raise EExecutionNotActiveException.Create('Only an active task can go to sleep');
   if FTerminated then
-    raise ETaskAlreadyTerminatedException.Create('Can''t sleep in an already terminated task. Just finish up!');
+    raise EExecutionAlreadyTerminatedException.Create('Can''t sleep in an already terminated task. Just finish up!');
   if Time = 0 then
     FExecutor.ScheduleForExecution(Self)
   else
@@ -980,14 +980,14 @@ procedure TExecutorHelper.Await(ATask: TTask; TimeOut: Int64; FreeTask: Boolean
   );
 begin
   if (GetExecutor <> Self) or not Assigned(FCurrentExecution) then
-    raise ENotATaskException.Create('Can only await inside a task');
+    raise ENotAnExecutionException.Create('Can only await inside a task');
   FCurrentExecution.Await(ATask, TimeOut, FreeTask);
 end;
 
 generic function TExecutorHelper.Await<TResult>(ATask: specialize TRVTask<TResult>; TimeOut: Int64 = -1; FreeTask: Boolean = True): TResult;
 begin
   if (GetExecutor <> Self) or not Assigned(FCurrentExecution) then
-    raise ENotATaskException.Create('Can only await inside a task');
+    raise ENotAnExecutionException.Create('Can only await inside a task');
   Result := FCurrentExecution.specialize Await<TResult>(ATask, TimeOut, FreeTask);
 end;
 
@@ -995,14 +995,14 @@ procedure TExecutorHelper.AwaitAll(const Tasks: array of TTask;
   ExceptionBehavior: TExceptionBehavior; TimeOut: Int64; FreeTasks: Boolean);
 begin
   if (GetExecutor <> Self) or not Assigned(FCurrentExecution) then
-    raise ENotATaskException.Create('Can only await inside a task');
+    raise ENotAnExecutionException.Create('Can only await inside a task');
   FCurrentExecution.AwaitAll(Tasks, ExceptionBehavior, TimeOut, FreeTasks);
 end;
 
 procedure TExecutor.Sleep(time: QWord);
 begin
   if (GetExecutor <> Self) or not Assigned(FCurrentExecution) then
-    raise ENotATaskException.Create('Can only sleep inside an asynchronous job');
+    raise ENotAnExecutionException.Create('Can only sleep inside an asynchronous job');
   FCurrentExecution.Sleep(time);
 end;
 
@@ -1033,7 +1033,7 @@ var
 begin
   Executor := GetExecutor;
   if not Assigned(Executor) then
-    raise ENotATaskException.Create('No active executor on this thread');
+    raise ENotAnExecutionException.Create('No active executor on this thread');
   Result := Executor.CurrentTask;
 end;
 
@@ -1043,7 +1043,7 @@ var
 begin
   Executor := GetExecutor;
   if not Assigned(Executor) then
-    raise ENotATaskException.Create('RunAsync can only be called from within a Task');
+    raise ENotAnExecutionException.Create('RunAsync can only be called from within a Task');
   Result := Executor.RunAsync(ATask, FreeTask, RaiseErrors);
 end;
 
@@ -1053,7 +1053,7 @@ var
 begin
   Executor := GetExecutor;
   if not Assigned(Executor) then
-    raise ENotATaskException.Create('ScheduleForAwait can only be called from within a Task');
+    raise ENotAnExecutionException.Create('ScheduleForAwait can only be called from within a Task');
   Result := Executor.ScheduleForAwait(ATask);
 end;
 
@@ -1063,7 +1063,7 @@ var
 begin
   Executor := GetExecutor;
   if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
-    raise ENotATaskException.Create('Await can only be called from within a Task');
+    raise ENotAnExecutionException.Create('Await can only be called from within a Task');
   Executor.CurrentTask.Await(ATask, TimeOut, FreeTask);
 end;
 
@@ -1073,7 +1073,7 @@ var
 begin
   Executor := GetExecutor;
   if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
-    raise ENotATaskException.Create('Await can only be called from within a Task');
+    raise ENotAnExecutionException.Create('Await can only be called from within a Task');
   Result := Executor.CurrentTask.specialize Await<TResult>(ATask, TimeOut, FreeTask);
 end;
 
@@ -1084,7 +1084,7 @@ var
 begin
   Executor := GetExecutor;
   if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
-    raise ENotATaskException.Create('Await can only be called from within a Task');
+    raise ENotAnExecutionException.Create('Await can only be called from within a Task');
   Executor.CurrentTask.AwaitAll(Tasks, ExceptionBehavior, TimeOut, FreeTasks);
 end;
 
@@ -1094,7 +1094,7 @@ var
 begin
   Executor := GetExecutor;
   if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
-    raise ENotATaskException.Create('AsyncSleep can only be called from within a Task');
+    raise ENotAnExecutionException.Create('AsyncSleep can only be called from within a Task');
   Executor.CurrentTask.Sleep(time);
 end;
 
