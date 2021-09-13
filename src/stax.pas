@@ -11,6 +11,10 @@ uses
   Classes, SysUtils, math, Generics.Collections, stax.helpertypes,
   fibers;
 
+
+// 4kb is the default page size. Maybe this is too little?
+const DefaultTaskStackSize = 4 * 1024;
+
 type
   // Forward definitions
   TExecutor = class;
@@ -83,8 +87,6 @@ type
   { TExecutable }
 
   TExecutable = class(TDependable)
-  // 4kb is the default page size. Maybe this is too little?
-  public const DefaultTaskStackSize = 4 * 1024;
   private
     FError: Exception;
     FStatus: TExecutionState;

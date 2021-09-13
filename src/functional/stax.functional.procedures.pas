@@ -1,89 +1,74 @@
 unit stax.functional.procedures;
 
-{$mode ObjFPC}{$H+}
+{$MODE ObjFpc}{$H+}
 
 interface
 
-uses
-  stax;
+uses stax;
 
 type
-  TTaskProcedure =
-    procedure(AExecutor: TExecutor);
-  TTaskMethodProcedure =
-    procedure(AExecutor: TExecutor) of object;
-  generic TSingleParamTaskProcedure<TParam1> =
-    procedure(AExecutor: TExecutor; AParam1: TParam1);
-  generic TSingleParamTaskMethodProcedure<TParam1> =
-    procedure(AExecutor: TExecutor; AParam1: TParam1) of object;
-  generic TDoubleParamTaskProcedure<TParam1, TParam2> =
-    procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2);
-  generic TDoubleParamTaskMethodProcedure<TParam1, TParam2> =
-    procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2) of object;
-  generic TTripleParamTaskProcedure<TParam1, TParam2, TParam3> =
-    procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3);
-  generic TTripleParamTaskMethodProcedure<TParam1, TParam2, TParam3> =
-    procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3) of object;
-  generic TQuadrupleParamTaskProcedure<TParam1, TParam2, TParam3, TParam4> =
-    procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4);
-  generic TQuadrupleParamTaskMethodProcedure<TParam1, TParam2, TParam3, TParam4> =
-    procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4) of object;
+  T0ParamProcedure = procedure(AExecutor: TExecutor);
+  T0ParamMethodProcedure = procedure(AExecutor: TExecutor) of object;
+  generic T1ParamProcedure<TParam1> = procedure(AExecutor: TExecutor; AParam1: TParam1);
+  generic T1ParamMethodProcedure<TParam1> = procedure(AExecutor: TExecutor; AParam1: TParam1) of object;
+  generic T2ParamProcedure<TParam1, TParam2> = procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2);
+  generic T2ParamMethodProcedure<TParam1, TParam2> = procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2) of object;
+  generic T3ParamProcedure<TParam1, TParam2, TParam3> = procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3);
+  generic T3ParamMethodProcedure<TParam1, TParam2, TParam3> = procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3) of object;
+  generic T4ParamProcedure<TParam1, TParam2, TParam3, TParam4> = procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4);
+  generic T4ParamMethodProcedure<TParam1, TParam2, TParam3, TParam4> = procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4) of object;
+  generic T5ParamProcedure<TParam1, TParam2, TParam3, TParam4, TParam5> = procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AParam5: TParam5);
+  generic T5ParamMethodProcedure<TParam1, TParam2, TParam3, TParam4, TParam5> = procedure(AExecutor: TExecutor; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AParam5: TParam5) of object;
 
-  { TProcedureTask }
-
-  TProcedureTask = class(TTask)
-  private
-    FProcPtr: TTaskProcedure;
-  protected
-    procedure Execute; override;
-  public
-    constructor Create(AProcedure: TTaskProcedure);
-  end;
-
-  { TMethodProcedureTask }
-
-  TMethodProcedureTask = class(TTask)
-  private
-    FProcPtr: TTaskMethodProcedure;
-  protected
-    procedure Execute; override;
-  public
-    constructor Create(AProcedure: TTaskMethodProcedure);
-  end;
-
-  { TSingleParamProcedureTask }
-
-  generic TSingleParamProcedureTask<TParam1> = class(TTask)
+  T0ParamProcedureTask = class(TTask)
   public type
-    TFunctionType = specialize TSingleParamTaskProcedure<TParam1>;
+    TFunctionType = T0ParamProcedure;
+  private
+    FProcPtr: TFunctionType;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AProcedure: TFunctionType; AStackSize: SizeInt = DefaultTaskStackSize);
+  end;
+
+  T0ParamMethodProcedureTask = class(TTask)
+  public type
+    TFunctionType = T0ParamMethodProcedure;
+  private
+    FProcPtr: TFunctionType;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AProcedure: TFunctionType; AStackSize: SizeInt = DefaultTaskStackSize);
+  end;
+
+  generic T1ParamProcedureTask<TParam1> = class(TTask)
+  public type
+    TFunctionType = specialize T1ParamProcedure<TParam1>;
   private
     FProcPtr: TFunctionType;
     FParam1: TParam1;
   protected
     procedure Execute; override;
   public
-    constructor Create(AProcedure: TFunctionType; AParam1: TParam1);
+    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AStackSize: SizeInt = DefaultTaskStackSize);
   end;
 
-  { TSingleParamMethodProcedureTask }
-
-  generic TSingleParamMethodProcedureTask<TParam1> = class(TTask)
+  generic T1ParamMethodProcedureTask<TParam1> = class(TTask)
   public type
-    TFunctionType = specialize TSingleParamTaskMethodProcedure<TParam1>;
+    TFunctionType = specialize T1ParamMethodProcedure<TParam1>;
   private
     FProcPtr: TFunctionType;
     FParam1: TParam1;
   protected
     procedure Execute; override;
   public
-    constructor Create(AProcedure: TFunctionType; AParam1: TParam1);
+    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AStackSize: SizeInt = DefaultTaskStackSize);
   end;
 
-  { TDoubleParamProcedureTask }
-
-  generic TDoubleParamProcedureTask<TParam1, TParam2> = class(TTask)
+  generic T2ParamProcedureTask<TParam1, TParam2> = class(TTask)
   public type
-    TFunctionType = specialize TDoubleParamTaskProcedure<TParam1, TParam2>;
+    TFunctionType = specialize T2ParamProcedure<TParam1, TParam2>;
   private
     FProcPtr: TFunctionType;
     FParam1: TParam1;
@@ -91,14 +76,12 @@ type
   protected
     procedure Execute; override;
   public
-    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2);
+    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AStackSize: SizeInt = DefaultTaskStackSize);
   end;
 
-  { TDoubleParamMethodProcedureTask }
-
-  generic TDoubleParamMethodProcedureTask<TParam1, TParam2> = class(TTask)
+  generic T2ParamMethodProcedureTask<TParam1, TParam2> = class(TTask)
   public type
-    TFunctionType = specialize TDoubleParamTaskMethodProcedure<TParam1, TParam2>;
+    TFunctionType = specialize T2ParamMethodProcedure<TParam1, TParam2>;
   private
     FProcPtr: TFunctionType;
     FParam1: TParam1;
@@ -106,14 +89,12 @@ type
   protected
     procedure Execute; override;
   public
-    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2);
+    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AStackSize: SizeInt = DefaultTaskStackSize);
   end;
 
-  { TTripleParamProcedureTask }
-
-  generic TTripleParamProcedureTask<TParam1, TParam2, TParam3> = class(TTask)
+  generic T3ParamProcedureTask<TParam1, TParam2, TParam3> = class(TTask)
   public type
-    TFunctionType = specialize TTripleParamTaskProcedure<TParam1, TParam2, TParam3>;
+    TFunctionType = specialize T3ParamProcedure<TParam1, TParam2, TParam3>;
   private
     FProcPtr: TFunctionType;
     FParam1: TParam1;
@@ -122,14 +103,12 @@ type
   protected
     procedure Execute; override;
   public
-    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3);
+    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AStackSize: SizeInt = DefaultTaskStackSize);
   end;
 
-  { TTripleParamMethodProcedureTask }
-
-  generic TTripleParamMethodProcedureTask<TParam1, TParam2, TParam3> = class(TTask)
+  generic T3ParamMethodProcedureTask<TParam1, TParam2, TParam3> = class(TTask)
   public type
-    TFunctionType = specialize TTripleParamTaskMethodProcedure<TParam1, TParam2, TParam3>;
+    TFunctionType = specialize T3ParamMethodProcedure<TParam1, TParam2, TParam3>;
   private
     FProcPtr: TFunctionType;
     FParam1: TParam1;
@@ -138,14 +117,12 @@ type
   protected
     procedure Execute; override;
   public
-    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3);
+    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AStackSize: SizeInt = DefaultTaskStackSize);
   end;
 
-  { TQuadrupleParamProcedureTask }
-
-  generic TQuadrupleParamProcedureTask<TParam1, TParam2, TParam3, TParam4> = class(TTask)
+  generic T4ParamProcedureTask<TParam1, TParam2, TParam3, TParam4> = class(TTask)
   public type
-    TFunctionType = specialize TQuadrupleParamTaskProcedure<TParam1, TParam2, TParam3, TParam4>;
+    TFunctionType = specialize T4ParamProcedure<TParam1, TParam2, TParam3, TParam4>;
   private
     FProcPtr: TFunctionType;
     FParam1: TParam1;
@@ -155,14 +132,12 @@ type
   protected
     procedure Execute; override;
   public
-    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4);
+    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AStackSize: SizeInt = DefaultTaskStackSize);
   end;
 
-  { TQuadrupleParamMethodProcedureTask }
-
-  generic TQuadrupleParamMethodProcedureTask<TParam1, TParam2, TParam3, TParam4> = class(TTask)
+  generic T4ParamMethodProcedureTask<TParam1, TParam2, TParam3, TParam4> = class(TTask)
   public type
-    TFunctionType = specialize TQuadrupleParamTaskMethodProcedure<TParam1, TParam2, TParam3, TParam4>;
+    TFunctionType = specialize T4ParamMethodProcedure<TParam1, TParam2, TParam3, TParam4>;
   private
     FProcPtr: TFunctionType;
     FParam1: TParam1;
@@ -172,169 +147,203 @@ type
   protected
     procedure Execute; override;
   public
-    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4);
+    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AStackSize: SizeInt = DefaultTaskStackSize);
+  end;
+
+  generic T5ParamProcedureTask<TParam1, TParam2, TParam3, TParam4, TParam5> = class(TTask)
+  public type
+    TFunctionType = specialize T5ParamProcedure<TParam1, TParam2, TParam3, TParam4, TParam5>;
+  private
+    FProcPtr: TFunctionType;
+    FParam1: TParam1;
+    FParam2: TParam2;
+    FParam3: TParam3;
+    FParam4: TParam4;
+    FParam5: TParam5;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AParam5: TParam5; AStackSize: SizeInt = DefaultTaskStackSize);
+  end;
+
+  generic T5ParamMethodProcedureTask<TParam1, TParam2, TParam3, TParam4, TParam5> = class(TTask)
+  public type
+    TFunctionType = specialize T5ParamMethodProcedure<TParam1, TParam2, TParam3, TParam4, TParam5>;
+  private
+    FProcPtr: TFunctionType;
+    FParam1: TParam1;
+    FParam2: TParam2;
+    FParam3: TParam3;
+    FParam4: TParam4;
+    FParam5: TParam5;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AParam5: TParam5; AStackSize: SizeInt = DefaultTaskStackSize);
   end;
 
 implementation
 
-{ TQuadrupleParamMethodProcedureTask }
-
-procedure TQuadrupleParamMethodProcedureTask.Execute;
-begin
-  FProcPtr(Executor, FParam1, FParam2, FParam3, FParam4);
-end;
-
-constructor TQuadrupleParamMethodProcedureTask.Create(
-  AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2;
-  AParam3: TParam3; AParam4: TParam4);
-begin
-  inherited Create;
-  FProcPtr := AProcedure;
-  FParam1 := AParam1;
-  FParam2 := AParam2;
-  FParam2 := AParam3;
-  FParam4 := AParam4;
-end;
-
-{ TQuadrupleParamProcedureTask }
-
-procedure TQuadrupleParamProcedureTask.Execute;
-begin
-  FProcPtr(Executor, FParam1, FParam2, FParam3, FParam4);
-end;
-
-constructor TQuadrupleParamProcedureTask.Create(AProcedure: TFunctionType;
-  AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4);
-begin
-  inherited Create;
-  FProcPtr := AProcedure;
-  FParam1 := AParam1;
-  FParam2 := AParam2;
-  FParam2 := AParam3;
-  FParam4 := AParam4;
-end;
-
-{ TTripleParamMethodProcedureTask }
-
-procedure TTripleParamMethodProcedureTask.Execute;
-begin
-  FProcPtr(Executor, FParam1, FParam2, FParam3);
-end;
-
-constructor TTripleParamMethodProcedureTask.Create(AProcedure: TFunctionType;
-  AParam1: TParam1; AParam2: TParam2; AParam3: TParam3);
-begin
-  inherited Create;
-  FProcPtr := AProcedure;
-  FParam1 := AParam1;
-  FParam2 := AParam2;
-  FParam2 := AParam3;
-end;
-
-{ TTripleParamProcedureTask }
-
-procedure TTripleParamProcedureTask.Execute;
-begin
-  FProcPtr(Executor, FParam1, FParam2, FParam3);
-end;
-
-constructor TTripleParamProcedureTask.Create(AProcedure: TFunctionType;
-  AParam1: TParam1; AParam2: TParam2; AParam3: TParam3);
-begin
-  inherited Create;
-  FProcPtr := AProcedure;
-  FParam1 := AParam1;
-  FParam2 := AParam2;
-  FParam2 := AParam3;
-end;
-
-{ TDoubleParamMethodProcedureTask }
-
-procedure TDoubleParamMethodProcedureTask.Execute;
-begin
-  FProcPtr(Executor, FParam1, FParam2);
-end;
-
-constructor TDoubleParamMethodProcedureTask.Create(AProcedure: TFunctionType;
-  AParam1: TParam1; AParam2: TParam2);
-begin
-  inherited Create;
-  FProcPtr := AProcedure;
-  FParam1 := AParam1;
-  FParam2 := AParam2;
-end;
-
-{ TDoubleParamProcedureTask }
-
-procedure TDoubleParamProcedureTask.Execute;
-begin
-  FProcPtr(Executor, FParam1, FParam2);
-end;
-
-constructor TDoubleParamProcedureTask.Create(AProcedure: TFunctionType;
-  AParam1: TParam1; AParam2: TParam2);
-begin
-  inherited Create;
-  FProcPtr := AProcedure;
-  FParam1 := AParam1;
-  FParam2 := AParam2;
-end;
-
-{ TSingleParamMethodProcedureTask }
-
-procedure TSingleParamMethodProcedureTask.Execute;
-begin
-  FProcPtr(Executor, FParam1);
-end;
-
-constructor TSingleParamMethodProcedureTask.Create(AProcedure: TFunctionType;
-  AParam1: TParam1);
-begin
-  inherited Create;
-  FProcPtr := AProcedure;
-  FParam1 := AParam1;
-end;
-
-{ TSingleParamProcedureTask }
-
-procedure TSingleParamProcedureTask.Execute;
-begin
-  FProcPtr(Executor, FParam1);
-end;
-
-constructor TSingleParamProcedureTask.Create(AProcedure: TFunctionType;
-  AParam1: TParam1);
-begin
-  inherited Create;
-  FProcPtr := AProcedure;
-  FParam1 := AParam1;
-end;
-
-{ TMethodProcedureTask }
-
-procedure TMethodProcedureTask.Execute;
+procedure T0ParamProcedureTask.Execute;
 begin
   FProcPtr(Executor);
 end;
 
-constructor TMethodProcedureTask.Create(AProcedure: TTaskMethodProcedure);
+constructor T0ParamProcedureTask.Create(AProcedure: TFunctionType; AStackSize: SizeInt);
 begin
-  inherited Create;
+  inherited Create(AStackSize);
   FProcPtr := AProcedure;
 end;
 
-{ TProcedureTask }
-
-procedure TProcedureTask.Execute;
+procedure T0ParamMethodProcedureTask.Execute;
 begin
   FProcPtr(Executor);
 end;
 
-constructor TProcedureTask.Create(AProcedure: TTaskProcedure);
+constructor T0ParamMethodProcedureTask.Create(AProcedure: TFunctionType; AStackSize: SizeInt);
 begin
-  inherited Create;
+  inherited Create(AStackSize);
   FProcPtr := AProcedure;
+end;
+
+procedure T1ParamProcedureTask.Execute;
+begin
+  FProcPtr(Executor, FParam1);
+end;
+
+constructor T1ParamProcedureTask.Create(AProcedure: TFunctionType; AParam1: TParam1; AStackSize: SizeInt);
+begin
+  inherited Create(AStackSize);
+  FProcPtr := AProcedure;
+  FParam1 := AParam1;
+end;
+
+procedure T1ParamMethodProcedureTask.Execute;
+begin
+  FProcPtr(Executor, FParam1);
+end;
+
+constructor T1ParamMethodProcedureTask.Create(AProcedure: TFunctionType; AParam1: TParam1; AStackSize: SizeInt);
+begin
+  inherited Create(AStackSize);
+  FProcPtr := AProcedure;
+  FParam1 := AParam1;
+end;
+
+procedure T2ParamProcedureTask.Execute;
+begin
+  FProcPtr(Executor, FParam1, FParam2);
+end;
+
+constructor T2ParamProcedureTask.Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AStackSize: SizeInt);
+begin
+  inherited Create(AStackSize);
+  FProcPtr := AProcedure;
+  FParam1 := AParam1;
+  FParam2 := AParam2;
+end;
+
+procedure T2ParamMethodProcedureTask.Execute;
+begin
+  FProcPtr(Executor, FParam1, FParam2);
+end;
+
+constructor T2ParamMethodProcedureTask.Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AStackSize: SizeInt);
+begin
+  inherited Create(AStackSize);
+  FProcPtr := AProcedure;
+  FParam1 := AParam1;
+  FParam2 := AParam2;
+end;
+
+procedure T3ParamProcedureTask.Execute;
+begin
+  FProcPtr(Executor, FParam1, FParam2, FParam3);
+end;
+
+constructor T3ParamProcedureTask.Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AStackSize: SizeInt);
+begin
+  inherited Create(AStackSize);
+  FProcPtr := AProcedure;
+  FParam1 := AParam1;
+  FParam2 := AParam2;
+  FParam3 := AParam3;
+end;
+
+procedure T3ParamMethodProcedureTask.Execute;
+begin
+  FProcPtr(Executor, FParam1, FParam2, FParam3);
+end;
+
+constructor T3ParamMethodProcedureTask.Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AStackSize: SizeInt);
+begin
+  inherited Create(AStackSize);
+  FProcPtr := AProcedure;
+  FParam1 := AParam1;
+  FParam2 := AParam2;
+  FParam3 := AParam3;
+end;
+
+procedure T4ParamProcedureTask.Execute;
+begin
+  FProcPtr(Executor, FParam1, FParam2, FParam3, FParam4);
+end;
+
+constructor T4ParamProcedureTask.Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AStackSize: SizeInt);
+begin
+  inherited Create(AStackSize);
+  FProcPtr := AProcedure;
+  FParam1 := AParam1;
+  FParam2 := AParam2;
+  FParam3 := AParam3;
+  FParam4 := AParam4;
+end;
+
+procedure T4ParamMethodProcedureTask.Execute;
+begin
+  FProcPtr(Executor, FParam1, FParam2, FParam3, FParam4);
+end;
+
+constructor T4ParamMethodProcedureTask.Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AStackSize: SizeInt);
+begin
+  inherited Create(AStackSize);
+  FProcPtr := AProcedure;
+  FParam1 := AParam1;
+  FParam2 := AParam2;
+  FParam3 := AParam3;
+  FParam4 := AParam4;
+end;
+
+procedure T5ParamProcedureTask.Execute;
+begin
+  FProcPtr(Executor, FParam1, FParam2, FParam3, FParam4, FParam5);
+end;
+
+constructor T5ParamProcedureTask.Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AParam5: TParam5; AStackSize: SizeInt);
+begin
+  inherited Create(AStackSize);
+  FProcPtr := AProcedure;
+  FParam1 := AParam1;
+  FParam2 := AParam2;
+  FParam3 := AParam3;
+  FParam4 := AParam4;
+  FParam5 := AParam5;
+end;
+
+procedure T5ParamMethodProcedureTask.Execute;
+begin
+  FProcPtr(Executor, FParam1, FParam2, FParam3, FParam4, FParam5);
+end;
+
+constructor T5ParamMethodProcedureTask.Create(AProcedure: TFunctionType; AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AParam5: TParam5; AStackSize: SizeInt);
+begin
+  inherited Create(AStackSize);
+  FProcPtr := AProcedure;
+  FParam1 := AParam1;
+  FParam2 := AParam2;
+  FParam3 := AParam3;
+  FParam4 := AParam4;
+  FParam5 := AParam5;
 end;
 
 end.
-
