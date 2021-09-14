@@ -136,11 +136,11 @@ private
 procedure ProcessMessages(AExecutor: TExecutor);
 begin
   AExecutor.Sleep(10);
-  AExecutor.RunAsync(AsyncProcedure(@ProcessMessages));
+  AExecutor.RunAsync(AsyncProcedure(@ProcessMessages, 16 * DefaultTaskStackSize));
   Application.ProcessMessages;
 end;
 ```
-3. Add a timer (e.g. with the name StaxStartTimer) with a very small interval (0-10) with enabled to true. In that timers event create the executor and let it run with the ProcessMessages function:
+3. Add a timer (e.g. with the name StaxStartTimer) with an interval  thats large enough such that the whole form has loaded before fireing (100) with enabled to true (or, set it to a very small interval and enable it in the forms OnActivate event, but make sure to not activate it twice, e.g. by checking if FExecutor is Assigned). In that timers event create the executor and let it run with the ProcessMessages function:
 ```pascal
 procedure TForm1.StaxStartTimerTimer(Sender: TObject);
 begin
@@ -150,7 +150,7 @@ begin
   FExecutor := TExecutor.Create;
   try
     FExecutor.OnError := @Self.HandleTaskError;
-    FExecutor.RunAsync(AsyncProcedure(@ProcessMessages));
+    FExecutor.RunAsync(AsyncProcedure(@ProcessMessages, 16 * DefaultTaskStackSize));
     FExecutor.Run;
   finally
     FExecutor.Free;
@@ -172,9 +172,11 @@ It will reschedule iteself before actually calling `Application.ProcessMessages`
 The reason for this is that now tasks can yield during event handlers, and while they are yielded, the event loop can start again and start serving the next event.
 This way you can use `AsyncSleep` and `Await` within event handlers without having to worry about freezing your application.
 The `Sleep` inside is to not have the application loop alone utilizing all of the CPU power which would result in having the application taking 100% CPU usage.
+The LCL message loop can, depending on the complexity of event handlers and the widgetset easiely exceed the 4k stack size, so we set it to 16 times that (64k).
+If that is not enough for your application, change this value accordingly, but be aware, larger values might result in performance loss which could result in lagging.
 
 The timer is required to start the STAX event loop, any earlier events like `OnCreate` or `OnActivate` need to return, otherwise the application will freeze.
-It is very important to set an error handler, otherwise a single uncaught exception will kill the whole STAX loop
+It is very important to set an error handler, otherwise a single uncaught exception will kill the whole STAX loop. Again use the same stack size here as in the ProcessMessages function.
 
 The `OnClose` event is fired when the user requests closing of the form, but because we have still the `Executor` running the LCL can't finish the application.
 So to be able to close the form and stop the application, we need to tell the `Executor` to stop by calling it's `Terminate` function.

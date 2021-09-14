@@ -93,7 +93,7 @@ begin
   FExecutor := TExecutor.Create;
   try
     FExecutor.OnError := @Self.HandleTaskError;
-    FExecutor.RunAsync(AsyncProcedure(@RenderGame));
+    FExecutor.RunAsync(AsyncProcedure(@RenderGame, 16 * DefaultTaskStackSize));
     FExecutor.Run;
   finally
     FExecutor.Free;
@@ -261,7 +261,7 @@ begin
   end;
   AsyncSleep(10);
   // reschedule before calling process message
-  RunAsync(AsyncProcedure(@RenderGame));
+  FExecutor.RunAsync(AsyncProcedure(@RenderGame, 16 * DefaultTaskStackSize));
   Application.ProcessMessages;
 end;
 

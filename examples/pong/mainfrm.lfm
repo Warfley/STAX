@@ -1,68 +1,70 @@
 object Form1: TForm1
-  Left = 472
-  Height = 781
-  Top = 250
-  Width = 1000
+  Left = 315
+  Height = 521
+  Top = 167
+  Width = 667
   Caption = 'Form1'
-  ClientHeight = 781
-  ClientWidth = 1000
-  DesignTimePPI = 144
+  ClientHeight = 521
+  ClientWidth = 667
   OnClose = FormClose
   OnKeyDown = FormKeyDown
   OnKeyUp = FormKeyUp
   object PlayerPanel: TShape
-    Left = 974
-    Height = 144
-    Top = 320
-    Width = 26
+    Left = 983
+    Height = 96
+    Top = 213
+    Width = 17
     Anchors = [akTop, akRight]
     Brush.Color = clBlack
   end
   object OpponentPanel: TShape
     Left = 0
-    Height = 144
-    Top = 320
-    Width = 26
+    Height = 96
+    Top = 213
+    Width = 17
     Brush.Color = clBlack
   end
   object Ball: TShape
-    Left = 488
-    Height = 24
-    Top = 368
-    Width = 24
+    Left = 325
+    Height = 16
+    Top = 245
+    Width = 16
     Brush.Color = clBlack
     Shape = stCircle
   end
   object StartServerButton: TButton
-    Left = 352
-    Height = 32
-    Top = 386
-    Width = 274
+    Left = 235
+    Height = 21
+    Top = 257
+    Width = 183
     Caption = 'Host'
     OnClick = StartServerButtonClick
+    ParentFont = False
     TabOrder = 0
   end
   object StartClientButton: TButton
-    Left = 512
-    Height = 32
-    Top = 337
-    Width = 111
+    Left = 341
+    Height = 21
+    Top = 225
+    Width = 74
     Caption = 'Connect'
     OnClick = StartClientButtonClick
+    ParentFont = False
     TabOrder = 1
   end
   object HostEdit: TEdit
-    Left = 358
+    Left = 239
     Height = 33
-    Top = 336
-    Width = 144
+    Top = 224
+    Width = 96
+    ParentFont = False
     TabOrder = 2
     Text = '127.0.0.1'
   end
   object STAXStartTimer: TTimer
-    Interval = 10
+    Interval = 100
     OnTimer = STAXStartTimerTimer
-    Left = 224
-    Top = 568
+    Left = 149
+    Top = 379
   end
 end
