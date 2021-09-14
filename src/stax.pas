@@ -12,8 +12,8 @@ uses
   fibers;
 
 
-// 4kb is the default page size. Maybe this is too little?
-const DefaultTaskStackSize = 4 * 1024;
+// 16kb (4 pages). Maybe this is too little?
+const DefaultTaskStackSize = 16 * 1024;
 
 type
   // Forward definitions
