@@ -56,51 +56,51 @@ generic function AsyncProcedure<TParam1, TParam2, TParam3, TParam4, TParam5>(
 generic function AsyncFunction<TResult>(
   AFunction: specialize T0ParamFunction<TResult>;
   
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; inline;
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; inline;
 generic function AsyncFunction<TResult>(
   AFunction: specialize T0ParamMethodFunction<TResult>;
   
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; inline;
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; inline;
 generic function AsyncFunction<TResult, TParam1>(
   AFunction: specialize T1ParamFunction<TResult, TParam1>;
   AParam1: TParam1; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; inline;
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; inline;
 generic function AsyncFunction<TResult, TParam1>(
   AFunction: specialize T1ParamMethodFunction<TResult, TParam1>;
   AParam1: TParam1; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; inline;
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; inline;
 generic function AsyncFunction<TResult, TParam1, TParam2>(
   AFunction: specialize T2ParamFunction<TResult, TParam1, TParam2>;
   AParam1: TParam1; AParam2: TParam2; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; inline;
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; inline;
 generic function AsyncFunction<TResult, TParam1, TParam2>(
   AFunction: specialize T2ParamMethodFunction<TResult, TParam1, TParam2>;
   AParam1: TParam1; AParam2: TParam2; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; inline;
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; inline;
 generic function AsyncFunction<TResult, TParam1, TParam2, TParam3>(
   AFunction: specialize T3ParamFunction<TResult, TParam1, TParam2, TParam3>;
   AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; inline;
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; inline;
 generic function AsyncFunction<TResult, TParam1, TParam2, TParam3>(
   AFunction: specialize T3ParamMethodFunction<TResult, TParam1, TParam2, TParam3>;
   AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; inline;
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; inline;
 generic function AsyncFunction<TResult, TParam1, TParam2, TParam3, TParam4>(
   AFunction: specialize T4ParamFunction<TResult, TParam1, TParam2, TParam3, TParam4>;
   AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; inline;
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; inline;
 generic function AsyncFunction<TResult, TParam1, TParam2, TParam3, TParam4>(
   AFunction: specialize T4ParamMethodFunction<TResult, TParam1, TParam2, TParam3, TParam4>;
   AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; inline;
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; inline;
 generic function AsyncFunction<TResult, TParam1, TParam2, TParam3, TParam4, TParam5>(
   AFunction: specialize T5ParamFunction<TResult, TParam1, TParam2, TParam3, TParam4, TParam5>;
   AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AParam5: TParam5; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; inline;
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; inline;
 generic function AsyncFunction<TResult, TParam1, TParam2, TParam3, TParam4, TParam5>(
   AFunction: specialize T5ParamMethodFunction<TResult, TParam1, TParam2, TParam3, TParam4, TParam5>;
   AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AParam5: TParam5; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; inline;
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; inline;
 implementation
 
 function AsyncProcedure(
@@ -201,7 +201,7 @@ end;
 generic function AsyncFunction<TResult>(
   AFunction: specialize T0ParamFunction<TResult>;
   
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; 
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; 
 begin
   Result := (specialize T0ParamFunctionTask<TResult>).Create(AFunction, AStackSize);
 end;
@@ -209,7 +209,7 @@ end;
 generic function AsyncFunction<TResult>(
   AFunction: specialize T0ParamMethodFunction<TResult>;
   
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; 
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; 
 begin
   Result := (specialize T0ParamMethodFunctionTask<TResult>).Create(AFunction, AStackSize);
 end;
@@ -217,7 +217,7 @@ end;
 generic function AsyncFunction<TResult, TParam1>(
   AFunction: specialize T1ParamFunction<TResult, TParam1>;
   AParam1: TParam1; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; 
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; 
 begin
   Result := (specialize T1ParamFunctionTask<TResult, TParam1>).Create(AFunction, AParam1, AStackSize);
 end;
@@ -225,7 +225,7 @@ end;
 generic function AsyncFunction<TResult, TParam1>(
   AFunction: specialize T1ParamMethodFunction<TResult, TParam1>;
   AParam1: TParam1; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; 
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; 
 begin
   Result := (specialize T1ParamMethodFunctionTask<TResult, TParam1>).Create(AFunction, AParam1, AStackSize);
 end;
@@ -233,7 +233,7 @@ end;
 generic function AsyncFunction<TResult, TParam1, TParam2>(
   AFunction: specialize T2ParamFunction<TResult, TParam1, TParam2>;
   AParam1: TParam1; AParam2: TParam2; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; 
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; 
 begin
   Result := (specialize T2ParamFunctionTask<TResult, TParam1, TParam2>).Create(AFunction, AParam1, AParam2, AStackSize);
 end;
@@ -241,7 +241,7 @@ end;
 generic function AsyncFunction<TResult, TParam1, TParam2>(
   AFunction: specialize T2ParamMethodFunction<TResult, TParam1, TParam2>;
   AParam1: TParam1; AParam2: TParam2; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; 
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; 
 begin
   Result := (specialize T2ParamMethodFunctionTask<TResult, TParam1, TParam2>).Create(AFunction, AParam1, AParam2, AStackSize);
 end;
@@ -249,7 +249,7 @@ end;
 generic function AsyncFunction<TResult, TParam1, TParam2, TParam3>(
   AFunction: specialize T3ParamFunction<TResult, TParam1, TParam2, TParam3>;
   AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; 
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; 
 begin
   Result := (specialize T3ParamFunctionTask<TResult, TParam1, TParam2, TParam3>).Create(AFunction, AParam1, AParam2, AParam3, AStackSize);
 end;
@@ -257,7 +257,7 @@ end;
 generic function AsyncFunction<TResult, TParam1, TParam2, TParam3>(
   AFunction: specialize T3ParamMethodFunction<TResult, TParam1, TParam2, TParam3>;
   AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; 
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; 
 begin
   Result := (specialize T3ParamMethodFunctionTask<TResult, TParam1, TParam2, TParam3>).Create(AFunction, AParam1, AParam2, AParam3, AStackSize);
 end;
@@ -265,7 +265,7 @@ end;
 generic function AsyncFunction<TResult, TParam1, TParam2, TParam3, TParam4>(
   AFunction: specialize T4ParamFunction<TResult, TParam1, TParam2, TParam3, TParam4>;
   AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; 
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; 
 begin
   Result := (specialize T4ParamFunctionTask<TResult, TParam1, TParam2, TParam3, TParam4>).Create(AFunction, AParam1, AParam2, AParam3, AParam4, AStackSize);
 end;
@@ -273,7 +273,7 @@ end;
 generic function AsyncFunction<TResult, TParam1, TParam2, TParam3, TParam4>(
   AFunction: specialize T4ParamMethodFunction<TResult, TParam1, TParam2, TParam3, TParam4>;
   AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; 
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; 
 begin
   Result := (specialize T4ParamMethodFunctionTask<TResult, TParam1, TParam2, TParam3, TParam4>).Create(AFunction, AParam1, AParam2, AParam3, AParam4, AStackSize);
 end;
@@ -281,7 +281,7 @@ end;
 generic function AsyncFunction<TResult, TParam1, TParam2, TParam3, TParam4, TParam5>(
   AFunction: specialize T5ParamFunction<TResult, TParam1, TParam2, TParam3, TParam4, TParam5>;
   AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AParam5: TParam5; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; 
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; 
 begin
   Result := (specialize T5ParamFunctionTask<TResult, TParam1, TParam2, TParam3, TParam4, TParam5>).Create(AFunction, AParam1, AParam2, AParam3, AParam4, AParam5, AStackSize);
 end;
@@ -289,7 +289,7 @@ end;
 generic function AsyncFunction<TResult, TParam1, TParam2, TParam3, TParam4, TParam5>(
   AFunction: specialize T5ParamMethodFunction<TResult, TParam1, TParam2, TParam3, TParam4, TParam5>;
   AParam1: TParam1; AParam2: TParam2; AParam3: TParam3; AParam4: TParam4; AParam5: TParam5; 
-  AStackSize: SizeInt = DefaultTaskStackSize): TTask; 
+  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; 
 begin
   Result := (specialize T5ParamMethodFunctionTask<TResult, TParam1, TParam2, TParam3, TParam4, TParam5>).Create(AFunction, AParam1, AParam2, AParam3, AParam4, AParam5, AStackSize);
 end;

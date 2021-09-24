@@ -94,6 +94,7 @@ type
     FTerminated: Boolean;
     FFiber: TFiber;
     FNumDependencies: Integer;
+    FRequiredStackSize: SizeInt;
   public
     // Dependency management
     function HasDependencies: Boolean; inline;
@@ -129,6 +130,7 @@ type
     property Status: TExecutionState read FStatus;
     property Executor: TExecutor read FExecutor;
     property Terminated: Boolean read FTerminated;
+    property RequiredStackSize: SizeInt read FRequiredStackSize;
   end;
 
   { TTask }
@@ -165,6 +167,22 @@ type
     procedure AwaitAll(const Tasks: Array of TTask; ExceptionBehavior: TExceptionBehavior = ebAccumulate; TimeOut: Int64 = -1; FreeTasks: Boolean = True);
   end;
 
+  { TExecutionWorkFiber }
+
+  TExecutionWorkFiber = class(TExecutableFiber)
+  private
+    FExecution: TExecutable;
+    FStackSize: SizeInt;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(StackSize: SizeInt);
+    destructor Destroy; override;
+
+    property StackSize: SizeInt read FStackSize;
+    property Execution: TExecutable read FExecution write FExecution;
+  end;
+
   { TExecutor }
 
   TExecutor = class
@@ -180,7 +198,12 @@ type
       public class function c(constref A, B: TSleepQueueEntry): Boolean; static; inline;
     end;
     TSleepQueue = specialize TMinHeap<TSleepQueueEntry, TSleepQueueComparator>;
+
+    TFiberCache = specialize TList<TExecutionWorkFiber>;
+    TFiberCacheMap = specialize TDictionary<SizeInt, TFiberCache>;
   private
+    FCacheFibers: Boolean;
+    FFiberCache: TFiberCacheMap;
     FErrorHandler: TErrorHandler;
     FSchedulingQueue: TSchedulingQueue;
     FSleepQueue: TSleepQueue;
@@ -188,6 +211,10 @@ type
     FFiber: TFiber;
     FWaitingCount: Integer;
     FTerminated: Boolean;
+
+    // Fiber cache
+    procedure AssignFiber(AExecution: TExecutable); //inline;
+    procedure CacheFiber(AExecution: TExecutable); //inline;
 
     // error handling
     procedure RaiseErrorHandler(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
@@ -212,7 +239,7 @@ type
     procedure TeardownExecution;
 
   public
-    constructor Create;
+    constructor Create(CacheFibers: Boolean = True);
     destructor Destroy; override;
 
     function RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True): TTask;
@@ -237,18 +264,6 @@ type
     procedure Await(ATask: TTask; TimeOut: Int64 = -1; FreeTask: Boolean = True); overload; {$IFDEF inlining}inline;{$ENDIF}
     generic function Await<TResult>(ATask: specialize TRVTask<TResult>; TimeOut: Int64 = -1; FreeTask: Boolean = True): TResult; overload; {$IFDEF inlining}inline;{$ENDIF}
     procedure AwaitAll(const Tasks: Array of TTask; ExceptionBehavior: TExceptionBehavior = ebAccumulate; TimeOut: Int64 = -1; FreeTasks: Boolean = True);
-  end;
-
-  { TExecutionWorkFiber }
-
-  TExecutionWorkFiber = class(TExecutableFiber)
-  private
-    FExecution: TExecutable;
-  protected
-    procedure Execute; override;
-  public
-    constructor Create(StackSize: SizeInt; AExecution: TExecutable);
-    destructor Destroy; override;
   end;
 
 
@@ -328,13 +343,19 @@ end;
 
 procedure TExecutionWorkFiber.Execute;
 begin
-  FExecution.DoExecute;
+  while True do
+  begin
+    if Assigned(FExecution) then
+      FExecution.DoExecute;
+    Return;
+  end;
 end;
 
-constructor TExecutionWorkFiber.Create(StackSize: SizeInt; AExecution: TExecutable);
+constructor TExecutionWorkFiber.Create(StackSize: SizeInt);
 begin
   inherited Create(StackSize);
-  FExecution := AExecution;
+  FStackSize := StackSize;
+  FExecution := nil;
 end;
 
 destructor TExecutionWorkFiber.Destroy;
@@ -451,6 +472,8 @@ end;
 procedure TExecutable.FinalizeExecution;
 begin
   ResolveDependencies;
+  if Assigned(FExecutor) and Assigned(FFiber) then
+    FExecutor.CacheFiber(Self);
 end;
 
 constructor TExecutable.Create(AStackSize: SizeInt);
@@ -460,12 +483,14 @@ begin
   FError := nil;
   FStatus := esNone;
   FExecutor := nil;
-  FFiber := TExecutionWorkFiber.Create(AStackSize, Self);
+  FFiber := nil;
+  FRequiredStackSize := AStackSize;
 end;
 
 destructor TExecutable.Destroy;
 begin
-  FFiber.Free;
+  if Assigned(FFiber) then
+    FFiber.Free;
   if Assigned(FError) then
     FError.Free;
   inherited Destroy;
@@ -821,6 +846,39 @@ end;
 
 { TExecutor }
 
+procedure TExecutor.AssignFiber(AExecution: TExecutable);
+var
+  Cache: TFiberCache;
+  Fiber: TExecutionWorkFiber;
+begin
+  if FCacheFibers and // if caching is enabled
+     FFiberCache.TryGetValue(AExecution.RequiredStackSize, Cache) and // there is a cache for this size
+     (Cache.Count > 0) then // and there is a cached element
+    Fiber := Cache.ExtractIndex(Cache.Count - 1)
+  else
+    Fiber := TExecutionWorkFiber.Create(AExecution.RequiredStackSize);
+  Fiber.Execution := AExecution;
+  AExecution.FFiber := Fiber;
+end;
+
+procedure TExecutor.CacheFiber(AExecution: TExecutable);
+var
+  Cache: TFiberCache;
+  Fiber: TExecutionWorkFiber;
+begin
+  if not FCacheFibers then
+    Exit; // will be cleaned up by destructor
+  Fiber := TExecutionWorkFiber(AExecution.FFiber);
+  if not FFiberCache.TryGetValue(Fiber.StackSize, Cache) then
+  begin
+    Cache := TFiberCache.Create;
+    FFiberCache.Add(Fiber.StackSize, Cache);
+  end;
+  Cache.Add(Fiber);
+  Fiber.Execution := nil;
+  AExecution.FFiber := nil;
+end;
+
 procedure TExecutor.RaiseErrorHandler(ATask: TTask);
 var
   Err: Exception;
@@ -850,6 +908,8 @@ end;
 
 procedure TExecutor.ContinueExecutable(AExecutable: TExecutable);
 begin
+  if not Assigned(AExecutable.FFiber) then
+    AssignFiber(AExecutable);
   FCurrentExecution := AExecutable;
   FFiber.SwitchTo(AExecutable.FFiber);
   FCurrentExecution := nil;
@@ -937,7 +997,7 @@ begin
       ContinueExecutable(NextExecution);
       // if task finished, call the finish within the executors stack
       if NextExecution.Status >= esFinished then
-        NextExecution.FinalizeExecution;
+        NextExecution.FinalizeExecution; // will also cache the fiber
     end;
   end;
 end;
@@ -950,18 +1010,31 @@ begin
   CurrentExecutor := nil;
 end;
 
-constructor TExecutor.Create;
+constructor TExecutor.Create(CacheFibers: Boolean);
 begin
+  FFiberCache := TFiberCacheMap.Create;
   FSchedulingQueue := TSchedulingQueue.Create;
   FSleepQueue := TSleepQueue.Create;
   FCurrentExecution := nil;
+  FCacheFibers := CacheFibers;
 end;
 
 destructor TExecutor.Destroy;
+var
+  cache: TFiberCache;
+  i: SizeInt;
 begin
   // TODO: handle currently active and scheduled tasks
   FSleepQueue.Free;
   FSchedulingQueue.Free;
+  // Clear cached items
+  for cache in FFiberCache.Values do
+  begin
+    for i:=0 to Cache.Count - 1 do
+      cache[i].Free;
+    cache.Free;
+  end;
+  FFiberCache.Free;
   inherited Destroy;
 end;
 
