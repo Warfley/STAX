@@ -124,7 +124,7 @@ def generate_async_fun(paramcount: int, method: bool, body: bool, file: TextIOBa
     for i in range(1, paramcount + 1):
         file.write(f"AParam{i}: TParam{i}; ")
     file.write("\n")
-    file.write(f"  AStackSize: SizeInt = DefaultTaskStackSize): TTask; {'inline;' if not body else ''}\n")
+    file.write(f"  AStackSize: SizeInt = DefaultTaskStackSize): specialize TRVTask<TResult>; {'inline;' if not body else ''}\n")
     if not body:
         return
     file.write("begin\n")
