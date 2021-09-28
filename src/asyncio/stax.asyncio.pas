@@ -390,10 +390,13 @@ begin
 end;
 
 function TIOStringReadTask.ReadCount: String;
+var
+  Size: SizeInt;
 begin
   Result := '';
   SetLength(Result, FCount);
-  FReader.AsyncRead(Executor, @FResult[1], FCount, FAwaitFullData);
+  Size := FReader.AsyncRead(Executor, @Result[1], FCount, FAwaitFullData);
+  SetLength(Result, Size);
 end;
 
 procedure TIOStringReadTask.Execute;
