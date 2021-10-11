@@ -8,8 +8,9 @@ unit StaxPKG;
 interface
 
 uses
-  stax, stax.helpertypes, stax.functional, stax.functional.functions, 
-  stax.functional.procedures, stax.asyncio, stax.asyncconsole, stax.asynctcp, 
+  stax, stax.generators, stax.helpertypes, stax.functional, 
+  stax.functional.functions, stax.functional.procedures, 
+  stax.functional.generators, stax.asyncio, stax.asyncconsole, stax.asynctcp, 
   stax.internal.console, stax.internal.tcp, LazarusPackageIntf;
 
 implementation

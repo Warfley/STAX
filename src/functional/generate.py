@@ -4,6 +4,10 @@ from io import TextIOBase
 from sys import stdout
 from typing import TYPE_CHECKING
 
+TYPE_FUN = 0
+TYPE_PROC = 1
+TYPE_GEN = 2
+
 def generate_fun_types(paramcount: int, file: TextIOBase) -> None:
     gen_params = ", ".join([f"TParam{i}" for i in range(1, paramcount + 1)])
     params = "; " + "; ".join([f"AParam{i}: TParam{i}" for i in range(1, paramcount + 1)]) if paramcount else ""
@@ -28,6 +32,17 @@ def generate_proc_types(paramcount: int, file: TextIOBase) -> None:
 
     file.writelines([proc_line, proc_meth_line])
 
+def generate_gen_proc_types(paramcount: int, file: TextIOBase) -> None:
+    gen_params = ", ".join([f"TParam{i}" for i in range(1, paramcount + 1)])
+    params = "; " + "; ".join([f"AParam{i}: TParam{i}" for i in range(1, paramcount + 1)]) if paramcount else ""
+
+    param_line = f"(Yield: specialize TYieldFunction<TResult>{params})"
+    gen_line = f"<TResult, {gen_params}>" if paramcount else "<TResult>"
+
+    proc_line = f"  generic T{paramcount}ParamGeneratorProcedure{gen_line} = procedure{param_line};\n"
+    proc_meth_line = f"  generic T{paramcount}ParamGeneratorMethodProcedure{gen_line} = procedure{param_line} of object;\n"
+
+    file.writelines([proc_line, proc_meth_line])
 
 def generate_proc_task_header(paramcount: int, method: bool, file: TextIOBase) -> None:
     file.write("  generic " if paramcount else "  ")
@@ -65,13 +80,29 @@ def generate_fun_task_header(paramcount: int, method: bool, file: TextIOBase) ->
     file.write(f"    constructor Create(AFunction: TFunctionType; {create_params}AStackSize: SizeInt = DefaultTaskStackSize);\n")
     file.write("  end;\n")
 
-def generate_task_constructor(paramcount: int, method: bool, function: bool, file: TextIOBase) -> None:
-    type_name = f"T{paramcount}Param{'Method' if method  else ''}{'Function' if function else 'Procedure'}Task"
+def generate_gen_proc_task_header(paramcount: int, method: bool, file: TextIOBase) -> None:
+    gen_params = f"<TResult, {', '.join([f'TParam{i}' for i in range(1, paramcount + 1)])}>" if paramcount else "<TResult>"
+    file.write(f"  generic T{paramcount}ParamGenerator{'Method' if method  else ''}ProcedureTask{gen_params} = class(specialize TGenerator<TResult>)\n")
+    file.write("  public type\n")
+    file.write(f"    TFunctionType = specialize T{paramcount}ParamGenerator{'Method' if method else ''}Procedure{gen_params};\n")
+    file.write("  private\n")
+    file.write("    FProcPtr: TFunctionType;\n")
+    for i in range(1, paramcount + 1):
+        file.write(f"    FParam{i}: TParam{i};\n")
+    file.write("  protected\n")
+    file.write("    procedure Execute; override;\n")
+    file.write("  public\n")
     create_params = "; ".join([f"AParam{i}: TParam{i}" for i in range(1, paramcount + 1)]) + "; " if paramcount else ""
-    file.write(f"constructor {type_name}.Create({'AFunction' if function else 'AProcedure'}: TFunctionType; {create_params}AStackSize: SizeInt);\n")
+    file.write(f"    constructor Create(AProcedure: TFunctionType; {create_params}AStackSize: SizeInt = DefaultTaskStackSize);\n")
+    file.write("  end;\n")
+
+def generate_task_constructor(paramcount: int, method: bool, tp: int, file: TextIOBase) -> None:
+    type_name = f"T{paramcount}Param{'Generator' if tp == TYPE_GEN else ''}{'Method' if method  else ''}{'Function' if tp == TYPE_FUN else 'Procedure' }Task"
+    create_params = "; ".join([f"AParam{i}: TParam{i}" for i in range(1, paramcount + 1)]) + "; " if paramcount else ""
+    file.write(f"constructor {type_name}.Create({'AFunction' if tp == TYPE_FUN else 'AProcedure'}: TFunctionType; {create_params}AStackSize: SizeInt);\n")
     file.write("begin\n")
     file.write("  inherited Create(AStackSize);\n")
-    if function:
+    if tp == TYPE_FUN:
         file.write("  FFunPtr := AFunction;\n")
     else:
         file.write("  FProcPtr := AProcedure;\n")
@@ -79,16 +110,20 @@ def generate_task_constructor(paramcount: int, method: bool, function: bool, fil
         file.write(f"  FParam{i} := AParam{i};\n")
     file.write("end;\n")
 
-def generate_task_execute(paramcount: int, method: bool, function: bool, file: TextIOBase) -> None:
-    type_name = f"T{paramcount}Param{'Method' if method  else ''}{'Function' if function else 'Procedure'}Task"
+def generate_task_execute(paramcount: int, method: bool, tp: int, file: TextIOBase) -> None:
+    type_name = f"T{paramcount}Param{'Generator' if tp == TYPE_GEN else ''}{'Method' if method  else ''}{'Function' if tp == TYPE_FUN else 'Procedure' }Task"
     param_list = ", " + ", ".join([f"FParam{i}" for i in range(1, paramcount + 1)]) if paramcount else ""
     file.write(f"procedure {type_name}.Execute;\n")
     file.write("begin\n")
-    if function:
-        file.write("  FResult := FFunPtr")
+    if tp == TYPE_FUN:
+        file.write("  FResult := FFunPtr(")
     else:
-        file.write("  FProcPtr")
-    file.write(f"(Executor{param_list});\n")
+        file.write("  FProcPtr(")
+    if tp == TYPE_GEN:
+        file.write("@Yield")
+    else:
+        file.write("Executor")
+    file.write(f"{param_list});\n")
     file.write("end;\n")
 
 def generate_async_proc(paramcount: int, method: bool, body: bool, file: TextIOBase):
@@ -135,39 +170,67 @@ def generate_async_fun(paramcount: int, method: bool, body: bool, file: TextIOBa
     file.write("AStackSize);\n")
     file.write("end;\n")
 
-def generate_fun_file(paramcount: int, functions: bool) -> None:
-    with open(f"stax.functional.{'functions' if functions else 'procedures'}.pas", "w") as fl:
-        fl.write(f"unit stax.functional.{'functions' if functions else 'procedures'};\n\n")
+def generate_async_gen_proc(paramcount: int, method: bool, body: bool, file: TextIOBase):
+    fun_type_name = f"T{paramcount}ParamGenerator{'Method' if method  else ''}Procedure"
+    gen_params = f"<TResult, {', '.join([f'TParam{i}' for i in range(1, paramcount + 1)])}>" if paramcount else "<TResult>"
+    file.write(f"generic function AsyncGenerator{gen_params}(\n  ")
+    file.write(f"AProcedure: specialize {fun_type_name}{gen_params};\n  ")
+    for i in range(1, paramcount + 1):
+        file.write(f"AParam{i}: TParam{i}; ")
+    if paramcount:
+        file.write("\n")
+    file.write(f"  AStackSize: SizeInt = DefaultTaskStackSize): specialize IGenerator<TResult>; {'inline;' if not body else ''}\n")
+    if not body:
+        return
+    file.write("begin\n")
+    task_name = f"(specialize {fun_type_name}Task{gen_params})"
+    file.write(f"  Result := {task_name}.Create(AProcedure, ")
+    for i in range(1, paramcount + 1):
+        file.write(f"AParam{i}, ")
+    file.write("AStackSize);\n")
+    file.write("end;\n")
+
+
+def generate_fun_file(paramcount: int, tp: int) -> None:
+    with open(f"stax.functional.{'functions' if tp == TYPE_FUN else 'procedures' if tp == TYPE_PROC else 'generators'}.pas", "w") as fl:
+        fl.write(f"unit stax.functional.{'functions' if tp == TYPE_FUN else 'procedures' if tp == TYPE_PROC else 'generators'};\n\n")
         fl.write("{$MODE ObjFpc}{$H+}\n\n")
         fl.write("interface\n\n")
-        fl.write("uses stax;\n\n")
+        fl.write(f"uses stax{', stax.generators' if tp == TYPE_GEN else ''};\n\n")
         fl.write("type\n")
         for i in range(paramcount+1):
-            if functions:
+            if tp == TYPE_FUN:
                 generate_fun_types(i, fl)
-            else:
+            elif tp == TYPE_PROC:
                 generate_proc_types(i, fl)
+            else:
+                generate_gen_proc_types(i, fl)
         fl.write("\n")
         for i in range(paramcount+1):
-            if functions:
+            if tp == TYPE_FUN:
                 generate_fun_task_header(i, False, fl)
                 fl.write("\n")
                 generate_fun_task_header(i, True, fl)
                 fl.write("\n")
-            else:
+            elif tp == TYPE_PROC:
                 generate_proc_task_header(i, False, fl)
                 fl.write("\n")
                 generate_proc_task_header(i, True, fl)
                 fl.write("\n")
+            else:
+                generate_gen_proc_task_header(i, False, fl)
+                fl.write("\n")
+                generate_gen_proc_task_header(i, True, fl)
+                fl.write("\n")
         fl.write("implementation\n\n")
         for i in range(paramcount + 1):
-            generate_task_execute(i, False, functions, fl)
+            generate_task_execute(i, False, tp, fl)
             fl.write("\n")
-            generate_task_constructor(i, False, functions, fl)
+            generate_task_constructor(i, False, tp, fl)
             fl.write("\n")
-            generate_task_execute(i, True, functions, fl)
+            generate_task_execute(i, True, tp, fl)
             fl.write("\n")
-            generate_task_constructor(i, True, functions, fl)
+            generate_task_constructor(i, True, tp, fl)
             fl.write("\n")
         fl.write("end.")
 
@@ -176,7 +239,7 @@ def generate_main_file(paramcount: int) -> None:
         fl.write(f"unit stax.functional;\n\n")
         fl.write("{$MODE ObjFpc}{$H+}\n\n")
         fl.write("interface\n\n")
-        fl.write("uses stax, stax.functional.procedures, stax.functional.functions;\n\n")
+        fl.write("uses stax, stax.functional.procedures, stax.functional.functions, stax.functional.generators;\n\n")
         for i in range(paramcount+1):
             generate_async_proc(i, False, False, fl)
             generate_async_proc(i, True, False, fl)
@@ -184,6 +247,10 @@ def generate_main_file(paramcount: int) -> None:
         for i in range(paramcount+1):
             generate_async_fun(i, False, False, fl)
             generate_async_fun(i, True, False, fl)
+        fl.write("\n")
+        for i in range(paramcount+1):
+            generate_async_gen_proc(i, False, False, fl)
+            generate_async_gen_proc(i, True, False, fl)
         fl.write("implementation\n\n")
         for i in range(paramcount+1):
             generate_async_proc(i, False, True, fl)
@@ -196,6 +263,12 @@ def generate_main_file(paramcount: int) -> None:
             fl.write("\n")
             generate_async_fun(i, True, True, fl)
             fl.write("\n")
+        fl.write("\n")
+        for i in range(paramcount+1):
+            generate_async_gen_proc(i, False, True, fl)
+            fl.write("\n")
+            generate_async_gen_proc(i, True, True, fl)
+            fl.write("\n")
         fl.write("end.")
 
 def main():
@@ -204,8 +277,9 @@ def main():
 
     args = arg_parser.parse_args()
 
-    generate_fun_file(int(args.paramcount), False)
-    generate_fun_file(int(args.paramcount), True)
+    generate_fun_file(int(args.paramcount), TYPE_FUN)
+    generate_fun_file(int(args.paramcount), TYPE_PROC)
+    generate_fun_file(int(args.paramcount), TYPE_GEN)
     generate_main_file(int(args.paramcount))
 
 if __name__=="__main__":

@@ -12,48 +12,56 @@
         <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
       </SearchPaths>
     </CompilerOptions>
-    <Version Major="1"/>
-    <Files Count="10">
+    <Version Major="2"/>
+    <Files Count="12">
       <Item1>
         <Filename Value="src\stax.pas"/>
         <UnitName Value="stax"/>
       </Item1>
       <Item2>
-        <Filename Value="src\stax.helpertypes.pas"/>
-        <UnitName Value="stax.helpertypes"/>
+        <Filename Value="src\stax.generators.pas"/>
+        <UnitName Value="stax.generators"/>
       </Item2>
       <Item3>
-        <Filename Value="src\functional\stax.functional.pas"/>
-        <UnitName Value="stax.functional"/>
+        <Filename Value="src\stax.helpertypes.pas"/>
+        <UnitName Value="stax.helpertypes"/>
       </Item3>
       <Item4>
-        <Filename Value="src\functional\stax.functional.functions.pas"/>
-        <UnitName Value="stax.functional.functions"/>
+        <Filename Value="src\functional\stax.functional.pas"/>
+        <UnitName Value="stax.functional"/>
       </Item4>
       <Item5>
-        <Filename Value="src\functional\stax.functional.procedures.pas"/>
-        <UnitName Value="stax.functional.procedures"/>
+        <Filename Value="src\functional\stax.functional.functions.pas"/>
+        <UnitName Value="stax.functional.functions"/>
       </Item5>
       <Item6>
-        <Filename Value="src\asyncio\stax.asyncio.pas"/>
-        <UnitName Value="stax.asyncio"/>
+        <Filename Value="src\functional\stax.functional.procedures.pas"/>
+        <UnitName Value="stax.functional.procedures"/>
       </Item6>
       <Item7>
-        <Filename Value="src\asyncio\stax.asyncconsole.pas"/>
-        <UnitName Value="stax.asyncconsole"/>
+        <Filename Value="src\functional\stax.functional.generators.pas"/>
+        <UnitName Value="stax.functional.generators"/>
       </Item7>
       <Item8>
-        <Filename Value="src\asyncio\stax.asynctcp.pas"/>
-        <UnitName Value="stax.asynctcp"/>
+        <Filename Value="src\asyncio\stax.asyncio.pas"/>
+        <UnitName Value="stax.asyncio"/>
       </Item8>
       <Item9>
-        <Filename Value="src\asyncio\internal\stax.internal.console.pas"/>
-        <UnitName Value="stax.internal.console"/>
+        <Filename Value="src\asyncio\stax.asyncconsole.pas"/>
+        <UnitName Value="stax.asyncconsole"/>
       </Item9>
       <Item10>
+        <Filename Value="src\asyncio\stax.asynctcp.pas"/>
+        <UnitName Value="stax.asynctcp"/>
+      </Item10>
+      <Item11>
+        <Filename Value="src\asyncio\internal\stax.internal.console.pas"/>
+        <UnitName Value="stax.internal.console"/>
+      </Item11>
+      <Item12>
         <Filename Value="src\asyncio\internal\stax.internal.tcp.pas"/>
         <UnitName Value="stax.internal.tcp"/>
-      </Item10>
+      </Item12>
     </Files>
     <RequiredPkgs Count="1">
       <Item1>

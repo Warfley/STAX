@@ -19,6 +19,25 @@ During such waiting periods the `Task` can yield to the scheduler to allow other
 Through this mechanism `Tasks` will only be interrupted in fixed points, when the `Task` is not doing anything critical, and can therefore not result in race conditions between `Tasks`.
 This completely eliminates the need for locks or critical sections as well as the problems associated with such locks, such as deadlocks.
 
+## Generators
+Besides `Tasks` there are also generators.
+These are long running (potentially infinite) tasks, that produce multiple results during runtime.
+A task can create a generator and use it to generate values.
+When the task require the generator to generate a new value, it will schedule the generator and go to sleep until the next value was generated.
+After generating a value, the generator will sleep and not be scheduled until the next value needs to be generated.
+For this purpose the `AwaitNext<ResultType>` member of both `TTask` as well as `TGenerator<ResultType>` exists.
+
+To create a generator, either inherit from `TGenerator<ResultType>` and override the `Execute` method, or use a function pointer of the signature `procedure GeneratorFunc(Yield: specialize TYieldFunction<ResultType>[; Args])` and create a generator from this using the `AsyncGenerator` functions provided in the `stax.functional` unit.
+
+As generators might have potentially infinite execution time, unlike `Task`s they can not be simply terminated when finishing.
+With the the memory of the `TGenerator<ResultType>` can only be freed after the execution finished, it does not use the normal manual memory management as `Task` which can simply be awaited and Freed afterwards.
+Rather than that STAX makes use of reference counted `COM` interfaces.
+So when using generators don't use the `TGenerator<ResultType>` type directly, but always reference them through the `IGenerator<ResultType>` interface.
+
+Generators can also be iterated with `for VarName in Generator`.
+
+Examples for using generators can be found in the `examples/generators` directory.
+
 ## Use Cases
 The two main use-cases for such a system are first event based or interactive systems and second I/O.
 ### Interactive Systems
@@ -192,3 +211,4 @@ The examples directory contains a few small examples.
 * `awaitalltest` shows the usage of the `AwaitAll` function  with respect to exceptions
 * `timeout` contains an example for using timeouts with `Await`
 * `pong` provides a simple two player pong game via TCP, which incorporates STAX into LCL GUI applications
+* `generaotrs` this directory contains 3 examples on how to use generators, a simple generator generating 3 numbers, a generator iterating through directories recursively and an infinite generator.

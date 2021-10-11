@@ -1,6 +1,8 @@
 unit stax;
 
 {$mode objfpc}{$H+}
+{$ModeSwitch advancedrecords}
+
 {$IfDef RELEASE}
 {$define inlining}
 {$EndIf}
@@ -10,7 +12,6 @@ interface
 uses
   Classes, SysUtils, math, Generics.Collections, stax.helpertypes,
   fibers;
-
 
 // 16kb (4 pages). Maybe this is too little?
 const DefaultTaskStackSize = 16 * 1024;
@@ -24,6 +25,7 @@ type
   // Exceptions
   ETaskTerminatedException = class(Exception);
   EAwaitedTaskTerminatedException = class(Exception);
+  EAwaitedGeneratorTerminatedException = class(Exception);
   EAwaitTimeoutException = class(Exception);
   EExecutionAlreadyTerminatedException = class(Exception);
   EExecutionNotActiveException = class(Exception);
@@ -32,6 +34,7 @@ type
   ENotAnExecutionException = class(Exception);
   ESomethingWentHorriblyWrongException = class(Exception);
   EAlreadyOneExecutorActiveException = class(Exception);
+  EGeneratorFinishedException = class(Exception);
 
   { EUnhandledError }
 
@@ -100,13 +103,13 @@ type
     function HasDependencies: Boolean; inline;
     procedure DependencyResolved(ADependency: TDependable); {$IFDEF inlining}inline;{$ENDIF}
     procedure AddDependency(ADependency: TDependable); {$IFDEF inlining}inline;{$ENDIF}
-  private
+  protected
     // Scheduling
     procedure SetExecutor(AExecutor: TExecutor); {$IFDEF inlining}inline;{$ENDIF}
     procedure MarkScheduled;
     procedure YieldToScheduler; {$IFDEF inlining}inline;{$ENDIF}
     procedure Wait; {$IFDEF inlining}inline;{$ENDIF}
-  protected
+
     // Execution
     procedure DoExecute;
   protected
@@ -156,6 +159,32 @@ type
     property TaskResult: T read FResult;
   end;
 
+  generic TYieldFunction<TResult> = procedure(const AResult: TResult) of object;
+
+  { TGeneratorEnumerator }
+
+  generic TGeneratorEnumerator<TResult> = record
+  private
+    FGenerator: IUnknown;
+    FCurrent: TResult;
+  public
+    // use IUnknown because generic forward references make FPC sad
+    constructor Create(AGenerator: IUnknown);
+
+    function MoveNext: Boolean; inline;
+    property Current: TResult read FCurrent;
+  end;
+
+  generic IGenerator<TResult> = interface
+    function HasResult: Boolean;
+    function ExtractError: Exception;
+    procedure StartNextGeneration;
+    function GetIndex: SizeInt;
+    function GetValue: TResult;
+
+    function GetEnumerator: specialize TGeneratorEnumerator<TResult>;
+  end;
+
   TExceptionBehavior = (ebIgnore, ebRaiseAndTerminate, ebAccumulate);
 
   { TExecutableHelper }
@@ -165,6 +194,8 @@ type
     procedure Await(ATask: TTask; TimeOut: Int64 = -1; FreeTask: Boolean = True); overload;
     generic function Await<TResult>(ATask: specialize TRVTask<TResult>; TimeOut: Int64 = -1; FreeTask: Boolean = True): TResult; overload;
     procedure AwaitAll(const Tasks: Array of TTask; ExceptionBehavior: TExceptionBehavior = ebAccumulate; TimeOut: Int64 = -1; FreeTasks: Boolean = True);
+    generic function AwaitNext<TResult>(AGenerator: specialize IGenerator<TResult>; out Value: TResult): Boolean; overload;
+    generic function AwaitNext<TResult>(AGenerator: specialize IGenerator<TResult>): TResult; overload; inline;
   end;
 
   { TExecutionWorkFiber }
@@ -219,13 +250,11 @@ type
     // error handling
     procedure RaiseErrorHandler(ATask: TTask); {$IFDEF inlining}inline;{$ENDIF}
 
-    // scheduling
-    procedure ScheduleForExecution(AExecutable: TExecutable); {$IFDEF inlining}inline;{$ENDIF}
+    // Execution
     procedure ContinueExecutable(AExecutable: TExecutable); {$IFDEF inlining}inline;{$ENDIF}
 
     // Sleeping
     procedure QueueSleep(ATask: TExecutable; ATime: QWord); {$IFDEF inlining}inline;{$ENDIF}
-    procedure Wakeup(AExecutable: TExecutable);
     function HandleSleepQueue: QWord;
 
     // Waiting
@@ -241,6 +270,9 @@ type
   public
     constructor Create(CacheFibers: Boolean = True);
     destructor Destroy; override;
+
+    procedure ScheduleForExecution(AExecutable: TExecutable); {$IFDEF inlining}inline;{$ENDIF}
+    procedure Wakeup(AExecutable: TExecutable);
 
     function RunAsync(ATask: TTask; FreeTask: Boolean = True; RaiseErrors: Boolean = True): TTask;
     function ScheduleForAwait(ATask: TTask): TTask; {$IFDEF inlining}inline;{$ENDIF}
@@ -264,6 +296,8 @@ type
     procedure Await(ATask: TTask; TimeOut: Int64 = -1; FreeTask: Boolean = True); overload; {$IFDEF inlining}inline;{$ENDIF}
     generic function Await<TResult>(ATask: specialize TRVTask<TResult>; TimeOut: Int64 = -1; FreeTask: Boolean = True): TResult; overload; {$IFDEF inlining}inline;{$ENDIF}
     procedure AwaitAll(const Tasks: Array of TTask; ExceptionBehavior: TExceptionBehavior = ebAccumulate; TimeOut: Int64 = -1; FreeTasks: Boolean = True);
+    generic function AwaitNext<TResult>(AGenerator: specialize IGenerator<TResult>; out Value: TResult): Boolean; overload; inline;
+    generic function AwaitNext<TResult>(AGenerator: specialize IGenerator<TResult>): TResult; overload; inline;
   end;
 
 
@@ -274,9 +308,13 @@ function ScheduleForAwait(ATask: TTask): TTask; {$IFDEF inlining}inline;{$ENDIF}
 procedure Await(ATask: TTask; TimeOut: Int64 = -1; FreeTask: Boolean = True); overload; {$IFDEF inlining}inline;{$ENDIF}
 generic function Await<TResult>(ATask: specialize TRVTask<TResult>; TimeOut: Int64 = -1; FreeTask: Boolean = True): TResult; overload; {$IFDEF inlining}inline;{$ENDIF}
 procedure AwaitAll(const Tasks: array of TTask; ExceptionBehavior: TExceptionBehavior = ebAccumulate; TimeOut: Int64 = -1; FreeTasks: Boolean = True); {$IFDEF inlining}inline;{$ENDIF}
+generic function AwaitNext<TResult>(AGenerator: specialize IGenerator<TResult>; out Value: TResult): Boolean; overload; inline;
+generic function AwaitNext<TResult>(AGenerator: specialize IGenerator<TResult>): TResult; overload; inline;
 procedure AsyncSleep(time: QWord); {$IFDEF inlining}inline;{$ENDIF}
 
 implementation
+uses
+  stax.generators;
 
 // global variables
 threadvar CurrentExecutor: TExecutor;
@@ -378,6 +416,7 @@ var
 begin
   for ADepending in FDepending do
     ADepending.DependencyResolved(Self);
+  FDepending.Clear;
 end;
 
 constructor TDependable.Create;
@@ -780,6 +819,58 @@ begin
   end;
 end;
 
+generic function TExecutableHelper.AwaitNext<TResult>(AGenerator: specialize IGenerator<TResult>; out Value: TResult): Boolean;
+var
+  Gen: specialize TGenerator<TResult>;
+  Err: Exception;
+begin
+  Gen := AGenerator as specialize TGenerator<TResult>;
+  if Gen.Status >= esFinished then
+    Exit(False);
+  // Error checks
+  if FExecutor.FCurrentExecution <> Self then
+    raise EExecutionNotActiveException.Create('Only an active task can await');
+  if FTerminated then
+    raise  EExecutionAlreadyTerminatedException.Create('Can''t await in an already terminated task. Just finish up!');
+  if Assigned(Gen.Executor) and (Gen.Executor <> FExecutor) then
+    raise EForeignTaskException.Create('Can''t await a generator from another executor');
+  // Schedule generation
+  Gen.StartNextGeneration;
+  // add as dependency to that task in order to be notified when it finishes
+  AddDependency(Gen);
+  try
+    // Wait until the generator wakes us up or we are terminated
+    Wait;
+  except on E: ETaskTerminatedException do
+  begin
+    // If we got terminated, remove ourselves from the dependencies
+    // and reraise
+    raise E;
+  end;
+  end;
+  // check if we produced a result
+  Result := Gen.FHasResult;
+  Value := Gen.FGeneratedValue;
+  // Error handling
+  if Gen.Status = esError then
+  begin
+    Err := Gen.ExtractError;
+    if Err is ETaskTerminatedException then
+    begin
+      Err.Free;
+      raise EAwaitedGeneratorTerminatedException.Create('Awaited generator got terminated before finishing');
+    end
+    else
+      raise err;
+  end;
+end;
+
+generic function TExecutableHelper.AwaitNext<TResult>(AGenerator: specialize IGenerator<TResult>): TResult;
+begin
+  if not specialize AwaitNext<TResult>(AGenerator, Result) then
+    raise EGeneratorFinishedException.Create('Generator finished, no next element');
+end;
+
 procedure TExecutable.Sleep(Time: QWord);
 begin
   if FExecutor.FCurrentExecution <> Self then
@@ -815,6 +906,18 @@ end;
 procedure TRVTask.Execute;
 begin
   FResult := Default(T);
+end;
+
+{ TGeneratorEnumerator }
+
+constructor TGeneratorEnumerator.Create(AGenerator: IUnknown);
+begin
+  FGenerator := AGenerator;
+end;
+
+function TGeneratorEnumerator.MoveNext: Boolean;
+begin
+  Result := specialize AwaitNext<TResult>(specialize IGenerator<TResult>(FGenerator), FCurrent);
 end;
 
 {$EndRegion TExecutable}
@@ -898,14 +1001,6 @@ begin
   Err.Free;
 end;
 
-procedure TExecutor.ScheduleForExecution(AExecutable: TExecutable);
-begin
-  if not (AExecutable.FStatus in [esNone, esWaiting, esSleeping, esRunning]) then
-    Exit;
-  AExecutable.MarkScheduled;
-  FSchedulingQueue.Enqueue(AExecutable);
-end;
-
 procedure TExecutor.ContinueExecutable(AExecutable: TExecutable);
 begin
   if not Assigned(AExecutable.FFiber) then
@@ -921,22 +1016,6 @@ var
 begin
   EndTime := GetTickCount64 + ATime;
   FSleepQueue.Insert(specialize Pair<QWord, TExecutable>(EndTime, ATask));
-end;
-
-procedure TExecutor.Wakeup(AExecutable: TExecutable);
-var
-  i: SizeInt;
-begin
-  if not (AExecutable.Status in [esSleeping, esWaiting]) then
-    Exit;
-  if AExecutable.Status = esSleeping then
-    for i := 0 to SizeInt(FSleepQueue.Elements.Size) - 1 do
-      if FSleepQueue.Elements.Mutable[i]^.Second = AExecutable then
-      begin
-        FSleepQueue.Delete(i);
-        Break;
-      end;
-  ScheduleForExecution(AExecutable);
 end;
 
 function TExecutor.HandleSleepQueue: QWord;
@@ -1038,6 +1117,30 @@ begin
   inherited Destroy;
 end;
 
+procedure TExecutor.ScheduleForExecution(AExecutable: TExecutable);
+begin
+  if not (AExecutable.FStatus in [esNone, esWaiting, esSleeping, esRunning]) then
+    Exit;
+  AExecutable.MarkScheduled;
+  FSchedulingQueue.Enqueue(AExecutable);
+end;
+
+procedure TExecutor.Wakeup(AExecutable: TExecutable);
+var
+  i: SizeInt;
+begin
+  if not (AExecutable.Status in [esSleeping, esWaiting]) then
+    Exit;
+  if AExecutable.Status = esSleeping then
+    for i := 0 to SizeInt(FSleepQueue.Elements.Size) - 1 do
+      if FSleepQueue.Elements.Mutable[i]^.Second = AExecutable then
+      begin
+        FSleepQueue.Delete(i);
+        Break;
+      end;
+  ScheduleForExecution(AExecutable);
+end;
+
 function TExecutor.RunAsync(ATask: TTask; FreeTask: Boolean;
   RaiseErrors: Boolean): TTask;
 begin
@@ -1072,6 +1175,20 @@ begin
   if (GetExecutor <> Self) or not Assigned(FCurrentExecution) then
     raise ENotAnExecutionException.Create('Can only await inside a task');
   FCurrentExecution.AwaitAll(Tasks, ExceptionBehavior, TimeOut, FreeTasks);
+end;
+
+generic function TExecutorHelper.AwaitNext<TResult>(AGenerator: specialize IGenerator<TResult>; out Value: TResult): Boolean;
+begin
+  if (GetExecutor <> Self) or not Assigned(FCurrentExecution) then
+    raise ENotAnExecutionException.Create('Can only await inside a task');
+  Result := FCurrentExecution.specialize AwaitNext<TResult>(AGenerator, Value);
+end;
+
+generic function TExecutorHelper.AwaitNext<TResult>(AGenerator: specialize IGenerator<TResult>): TResult;
+begin
+  if (GetExecutor <> Self) or not Assigned(FCurrentExecution) then
+    raise ENotAnExecutionException.Create('Can only await inside a task');
+  Result := FCurrentExecution.specialize AwaitNext<TResult>(AGenerator);
 end;
 
 procedure TExecutor.Sleep(time: QWord);
@@ -1161,6 +1278,26 @@ begin
   if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
     raise ENotAnExecutionException.Create('Await can only be called from within a Task');
   Executor.CurrentTask.AwaitAll(Tasks, ExceptionBehavior, TimeOut, FreeTasks);
+end;
+
+generic function AwaitNext<TResult>(AGenerator: specialize IGenerator<TResult>; out Value: TResult): Boolean;
+ var
+  Executor: TExecutor;
+begin
+  Executor := GetExecutor;
+  if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
+    raise ENotAnExecutionException.Create('Await can only be called from within a Task');
+  Result := Executor.CurrentTask.specialize AwaitNext<TResult>(AGenerator, Value);
+end;
+
+generic function AwaitNext<TResult>(AGenerator: specialize IGenerator<TResult>): TResult;
+ var
+  Executor: TExecutor;
+begin
+  Executor := GetExecutor;
+  if not Assigned(Executor) or not Assigned(Executor.CurrentTask) then
+    raise ENotAnExecutionException.Create('Await can only be called from within a Task');
+  Result := Executor.CurrentTask.specialize AwaitNext<TResult>(AGenerator);
 end;
 
 procedure AsyncSleep(time: QWord);
